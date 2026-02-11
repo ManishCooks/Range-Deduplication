@@ -12,6 +12,7 @@ The main entry point that coordinates all system activities:
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
+from pydantic import TypeAdapter
 
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -57,19 +58,33 @@ class Orchestrator:
     
     def _load_config(self) -> None:
         """Load and parse configuration."""
-        from config.parser import load_config
+        from parser.parser import load_config
         
         print(f"[Orchestrator] Loading config: {self.config_path}")
+        # Load raw config (dict)
         self.config = load_config(self.config_path)
-        
-        # Extract key settings
-        self.global_config = self.config["global"]
-        self.workload_config = self.config.get("workload", {})
-        self.index_config = self.config.get("index", {})
-        
-        print(f"[Orchestrator] Dataset: {self.global_config['dataset']}")
-        print(f"[Orchestrator] Concurrency: {self.global_config['concurrency']}")
-        print(f"[Orchestrator] Batch size: {self.global_config['batch_size']}")
+
+        # Validate and coerce using pydantic models
+        try:
+            from parser.schema import GlobalConfig, WorkloadConfig, IndexConfig
+        except Exception:
+            # Defensive import error (shouldn't happen in normal runs)
+            raise
+
+        try:
+            self.global_config_model = GlobalConfig(**self.config["global"])
+            
+            workload_data = self.config.get("workload", {})
+            adapter = TypeAdapter(WorkloadConfig)
+            self.workload_config_model = adapter.validate_python(workload_data)
+            
+        except Exception as e:
+            raise RuntimeError(f"Configuration validation error: {e}") from e
+
+        # Backwards-compatible prints using validated models
+        print(f"[Orchestrator] Dataset: {self.global_config_model.dataset}")
+        print(f"[Orchestrator] Concurrency: {self.global_config_model.concurrency}")
+        print(f"[Orchestrator] Batch size: {self.global_config_model.batch_size}")
     
     # =========================================================================
     # DATABASE
@@ -79,14 +94,15 @@ class Orchestrator:
         """Initialize database connection."""
         from database_adapter import get_adapter
         
-        db_config = self.global_config["database"]
-        print(f"[Orchestrator] Connecting to {db_config['adapter']}://{db_config['host']}:{db_config['port']}")
-        
+        # Use validated DatabaseConfig from GlobalConfig model
+        db_config = self.global_config_model.database
+        print(f"[Orchestrator] Connecting to {db_config.adapter}://{db_config.host}:{db_config.port}")
+
         self.adapter = get_adapter(
-            adapter_type=db_config["adapter"],
-            host=db_config["host"],
-            port=db_config["port"],
-            collection=db_config["collection"]
+            adapter_type=db_config.adapter,
+            host=db_config.host,
+            port=db_config.port,
+            collection=db_config.collection
         )
         self.adapter.connect()
         print("[Orchestrator] Database connected")
@@ -97,21 +113,21 @@ class Orchestrator:
     
     def _init_workload(self) -> None:
         """Initialize workload environment."""
-        workload_type = self.workload_config.get("type", "complete_ingestion_read_only")
+        workload_type = self.workload_config_model.type
         print(f"[Orchestrator] Initializing workload: {workload_type}")
         
         # Import workload module based on type
         self.workload_module = self._get_workload_module(workload_type)
         
         # Set random seed for reproducibility
-        seed = self.global_config.get("seed", 42)
+        seed = self.global_config_model.seed
         self._set_seed(seed)
         print(f"[Orchestrator] Seed set: {seed}")
     
     def _get_workload_module(self, workload_type: str):
         """Dynamically import workload module."""
         # Normalize workload type
-        from config.schema import normalize_to_underscore
+        from parser.schema import normalize_to_underscore
         workload_type = normalize_to_underscore(workload_type)
         
         # Import the workload module
