@@ -265,7 +265,7 @@ class MilvusAdapter(DatabaseAdapter):
             vectors = [record["vector"] for record in batch]
             
             self._collection.insert([ids, vectors])
-            # Note: flush removed to avoid rate limiting - flush called at end of ingestion
+            # Note: flush removed to avoid rate limiting and for speed - flush called at end of ingestion
             
             elapsed = (time.perf_counter() - start) * 1000
             

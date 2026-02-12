@@ -164,3 +164,19 @@ def get_query_batch_size(config: Dict[str, Any]) -> int:
 def get_max_duration_seconds(config: Dict[str, Any]) -> float:
     """Get max duration for concurrent phase (0=unlimited)."""
     return get_workload_config(config).get("max_duration_seconds", 0.0)
+
+def get_drift_check_interval(config: Dict[str, Any]) -> float:
+    """Get interval for drift monitoring."""
+    return get_workload_config(config).get("drift_check_interval", 10.0)
+
+def get_drift_threshold(config: Dict[str, Any]) -> float:
+    """Get threshold for triggering re-indexing."""
+    return get_workload_config(config).get("drift_threshold", 0.1)
+
+def get_drift_metric_type(config: Dict[str, Any]) -> str:
+    """Get drift metric type (mmd or centroid)."""
+    return get_workload_config(config).get("drift_metric_type", "mmd")
+
+def get_mmd_kernel_bandwidth(config: Dict[str, Any]) -> float:
+    """Get kernel bandwidth for MMD."""
+    return get_workload_config(config).get("mmd_kernel_bandwidth", 1.0)

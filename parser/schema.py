@@ -100,10 +100,18 @@ class CompleteIngestionWorkloadKnobs(CommonWorkloadKnobs):
 # Concurrent ingestion workload knobs
 class ConcurrentIngestionWorkloadKnobs(CommonWorkloadKnobs):
     type: Literal["concurrent_ingestion_workload"] = "concurrent_ingestion_workload"
+    
+    # Existing Knobs
     initial_ingest_ratio: float = Field(default=0.5, ge=0, le=1)
     frequency_seconds: float = Field(default=5.0, gt=0)
     query_batch_size: int = Field(default=100, ge=1)
     max_duration_seconds: float = Field(default=0.0, ge=0)
+    
+    # Drift Detection Knobs 
+    drift_check_interval: float = Field(default=10.0, gt=0, description="Seconds between drift checks")
+    drift_threshold: float = Field(default=0.1, gt=0, description="MMD/Distance threshold to trigger re-index")
+    drift_metric_type: Literal["mmd", "centroid"] = Field(default="mmd", description="Algorithm for drift detection")
+    mmd_kernel_bandwidth: float = Field(default=1.0, gt=0, description="Sigma for MMD RBF kernel")
 
 # Union of all workload types
 WorkloadConfig = Union[CompleteIngestionWorkloadKnobs, ConcurrentIngestionWorkloadKnobs]
