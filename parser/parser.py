@@ -134,7 +134,7 @@ def get_metrics(config: Dict[str, Any]) -> list:
 
 
 # =============================================================================
-# COMMON WORKLOAD HELPERS (both workloads)
+# COMMON WORKLOAD HELPERS
 # =============================================================================
 
 def get_drop_collection_first(config: Dict[str, Any]) -> bool:
@@ -180,3 +180,32 @@ def get_drift_metric_type(config: Dict[str, Any]) -> str:
 def get_mmd_kernel_bandwidth(config: Dict[str, Any]) -> float:
     """Get kernel bandwidth for MMD."""
     return get_workload_config(config).get("mmd_kernel_bandwidth", 1.0)
+
+
+# =============================================================================
+# RWD WORKLOAD HELPERS
+# =============================================================================
+
+def get_read_ratio(config: Dict[str, Any]) -> float:
+    """Get read ratio for RWD workload."""
+    return get_workload_config(config).get("read_ratio", 0.7)
+
+
+def get_write_ratio(config: Dict[str, Any]) -> float:
+    """Get write ratio for RWD workload."""
+    return get_workload_config(config).get("write_ratio", 0.2)
+
+
+def get_delete_ratio(config: Dict[str, Any]) -> float:
+    """Get delete ratio for RWD workload."""
+    return get_workload_config(config).get("delete_ratio", 0.1)
+
+
+def get_zombie_threshold(config: Dict[str, Any]) -> float:
+    """Get zombie threshold for re-indexing."""
+    return get_workload_config(config).get("zombie_threshold", 0.15)
+
+
+def get_maintenance_check_interval(config: Dict[str, Any]) -> float:
+    """Get interval for maintenance (drift/zombie) checks."""
+    return get_workload_config(config).get("maintenance_check_interval", 10.0)

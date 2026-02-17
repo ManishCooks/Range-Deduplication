@@ -3,8 +3,8 @@ Config Schema - Data models for configuration.
 """
 
 from enum import Enum
-from typing import Any, Dict, List, Optional,Literal
-from pydantic import BaseModel, Field, model_validator
+from typing import Any, Dict, List, Literal, Optional, Union
+from pydantic import BaseModel, Field
 
 
 def normalize_to_underscore(name: str) -> str:
@@ -25,6 +25,7 @@ class WorkloadType(str, Enum):
     """Supported workload types."""
     COMPLETE_INGESTION_WORKLOAD = "complete_ingestion_workload"
     CONCURRENT_INGESTION_WORKLOAD = "concurrent_ingestion_workload"
+    RWD_WORKLOAD = "rwd_workload"
     
     @classmethod
     def _missing_(cls, value):
@@ -80,10 +81,6 @@ class GlobalConfig(BaseModel):
     batch_size: int = Field(default=1000, ge=1)
     vector_dimension: int = Field(default=128, ge=1)
 
-
-from pydantic import BaseModel, Field, RootModel
-from typing import Union
-
 # Common knobs for all workloads
 class CommonWorkloadKnobs(BaseModel):
     k: int = Field(default=10, ge=1)
@@ -113,5 +110,29 @@ class ConcurrentIngestionWorkloadKnobs(CommonWorkloadKnobs):
     drift_metric_type: Literal["mmd", "centroid"] = Field(default="mmd", description="Algorithm for drift detection")
     mmd_kernel_bandwidth: float = Field(default=1.0, gt=0, description="Sigma for MMD RBF kernel")
 
+
+class RwdWorkloadKnobs(CommonWorkloadKnobs):
+    type: Literal["rwd_workload"] = "rwd_workload"
+
+    initial_ingest_ratio: float = Field(default=0.5, ge=0, le=1)
+
+    read_ratio: float = Field(default=0.7, ge=0)
+    write_ratio: float = Field(default=0.2, ge=0)
+    delete_ratio: float = Field(default=0.1, ge=0)
+
+    frequency_seconds: float = Field(default=5.0, gt=0)
+    query_batch_size: int = Field(default=100, ge=1)
+    max_duration_seconds: float = Field(default=0.0, ge=0)
+
+    maintenance_check_interval: float = Field(default=10.0, gt=0)
+    drift_threshold: float = Field(default=0.1, ge=0)
+    zombie_threshold: float = Field(default=0.15, ge=0, le=1)
+    drift_metric_type: Literal["mmd", "centroid"] = Field(default="mmd")
+    mmd_kernel_bandwidth: float = Field(default=1.0, gt=0)
+
 # Union of all workload types
-WorkloadConfig = Union[CompleteIngestionWorkloadKnobs, ConcurrentIngestionWorkloadKnobs]
+WorkloadConfig = Union[
+    CompleteIngestionWorkloadKnobs,
+    ConcurrentIngestionWorkloadKnobs,
+    RwdWorkloadKnobs,
+]

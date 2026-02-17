@@ -68,7 +68,6 @@ class Orchestrator:
         try:
             from parser.schema import GlobalConfig, WorkloadConfig, IndexConfig
         except Exception:
-            # Defensive import error (shouldn't happen in normal runs)
             raise
 
         try:
