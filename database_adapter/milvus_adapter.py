@@ -417,3 +417,218 @@ class MilvusAdapter(DatabaseAdapter):
             "num_entities": self._collection.num_entities,
             "schema": str(self._collection.schema),
         }
+    
+    # =========================================================
+    # Filtered Workload Implementation
+    # =========================================================
+
+    def create_filtered_collection(self, vector_dim: int, drop_existing: bool = True):
+        """
+        Creates a collection with schema: [id: INT64, vector: FLOAT_VECTOR, label: INT32]
+        """
+        collection_name = getattr(self._config,"collection", "default")
+        
+        if utility.has_collection(collection_name, using=self._connection_alias):
+            if drop_existing:
+                utility.drop_collection(collection_name, using=self._connection_alias)
+            else:
+                self._collection = Collection(collection_name, using=self._connection_alias)
+                return
+
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=False),
+            FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=vector_dim),
+            FieldSchema(name="label", dtype=DataType.INT32)  # The filtering field
+        ]
+        
+        schema = CollectionSchema(fields=fields, description="Benchmarking with Filters")
+        self._collection = Collection(name=collection_name, schema=schema, using=self._connection_alias)
+        print(f"[Milvus] Created filtered collection: {collection_name}")
+
+    def insert_filtered(self, ids: List[int], vectors: List[List[float]], labels: List[int]):
+        """Batch insert with labels."""
+        if not self._collection:
+            raise RuntimeError("Collection not initialized.")
+        
+        # Milvus expects columnar data: [ids_list, vectors_list, labels_list]
+        self._collection.insert([ids, vectors, labels])
+
+    def search_filtered(self, query_vector: List[float], k: int, filter_expr: str, params: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Search with `expr`.
+        Params:
+            filter_expr: e.g., "label in [1, 2]"
+        """
+        if not self._collection:
+            raise RuntimeError("Collection not initialized.")
+        
+        # Translate generic params to Milvus specific
+        search_params = {"metric_type": self._metric_type}
+        
+        # Handle HNSW/IVF specifics
+        idx_type = self._index_params.get("index_type", "HNSW")
+        if idx_type == "HNSW":
+            search_params["params"] = {"ef": params.get("ef_search", 100)}
+        elif idx_type in ["IVF_FLAT", "IVF_PQ"]:
+            search_params["params"] = {"nprobe": params.get("nprobe", 10)}
+        
+        results = self._collection.search(
+            data=[query_vector],
+            anns_field="vector",
+            param=search_params,
+            limit=k,
+            expr=filter_expr,  
+            output_fields=["id"]
+        )
+
+        hits = []
+        if results:
+            for hit in results[0]:
+                hits.append({"id": hit.id, "distance": hit.distance})
+        return hits
+
+    # =========================================================
+    # Multi-Modal Implementation
+    # =========================================================
+
+    def create_multi_modal_collection(self, vector_dim: int, mode: str = "unified", partitions: List[str] = None, drop_existing: bool = True):
+        """
+        Create collection for multi-modal workload.
+        Unified: Adds 'modality' (INT8) field.
+        Partitioned: Creates standard collection + partitions.
+        """
+        self._ensure_connected()
+        collection_name = self._config.collection
+        
+        # Dropping existing
+        if utility.has_collection(collection_name, using=self._connection_alias):
+            if drop_existing:
+                utility.drop_collection(collection_name, using=self._connection_alias)
+                print(f"[Milvus] Dropped existing collection: {collection_name}")
+            else:
+                self._collection = Collection(collection_name, using=self._connection_alias)
+        
+        if not self._collection:
+            # Define Schema
+            fields = [
+                FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=False),
+                FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=vector_dim),
+            ]
+            
+            if mode == "unified":
+                # Unified mode uses a scalar field for modality
+                fields.append(FieldSchema(name="modality", dtype=DataType.INT8))
+            
+            schema = CollectionSchema(fields=fields, description=f"Multi-Modal ({mode})")
+            self._collection = Collection(name=collection_name, schema=schema, using=self._connection_alias)
+            print(f"[Milvus] Created collection: {collection_name} (Mode: {mode})")
+
+        # Create Partitions if needed
+        if mode == "partitioned" and partitions:
+            for part_name in partitions:
+                if not self._collection.has_partition(part_name):
+                    self._collection.create_partition(part_name)
+                    print(f"[Milvus] Created partition: {part_name}")
+
+    def insert_multi_modal(self, batch: List[Dict[str, Any]], mode: str = "unified"):
+        """
+        Insert batch with modality info.
+        Batch items: {'id': int, 'vector': list, 'modality_id': int, 'partition_tag': str}
+        """
+        self._ensure_connected()
+        if not self._collection: raise InsertError("Collection not initialized")
+
+        ids = [item['id'] for item in batch]
+        vectors = [item['vector'] for item in batch]
+        
+        if mode == "unified":
+            modalities = [item['modality_id'] for item in batch]
+            self._collection.insert([ids, vectors, modalities])
+        
+        elif mode == "partitioned":
+            # Group by partition tag
+            from collections import defaultdict
+            batches_by_part = defaultdict(lambda: {"ids": [], "vectors": []})
+            
+            for item in batch:
+                tag = item.get('partition_tag', '_default')
+                batches_by_part[tag]["ids"].append(item['id'])
+                batches_by_part[tag]["vectors"].append(item['vector'])
+            
+            for tag, data in batches_by_part.items():
+                self._collection.insert(
+                    [data["ids"], data["vectors"]],
+                    partition_name=tag
+                )
+
+    def search_multi_modal(self, query_vector: List[float], k: int, 
+                          modality_filter: Optional[int] = None, 
+                          partition_filter: Optional[str] = None,
+                          params: Dict[str, Any] = None) -> List[Dict[str, Any]]:
+        """
+        Search with optional modality/partition filtering.
+        """
+        self._ensure_connected()
+        search_params = {"metric_type": self._metric_type}
+        
+        # Build index params
+        idx_type = self._index_params.get("index_type", "HNSW") if self._index_params else "HNSW"
+        if idx_type == "HNSW":
+            search_params["params"] = {"ef": params.get("ef_search", 100)}
+        elif idx_type in ["IVF_FLAT", "IVF_PQ"]:
+             search_params["params"] = {"nprobe": params.get("nprobe", 10)}
+        
+        # Configure filters
+        expr = None
+        partition_names = None
+        
+        if modality_filter is not None:
+             expr = f"modality == {modality_filter}"
+            
+        if partition_filter is not None:
+            partition_names = [partition_filter]
+
+        results = self._collection.search(
+            data=[query_vector],
+            anns_field="vector",
+            param=search_params,
+            limit=k,
+            expr=expr,
+            partition_names=partition_names,
+            output_fields=["id"]
+        )
+
+        hits = []
+        if results:
+            for hit in results[0]:
+                hits.append({"id": hit.id, "distance": hit.distance})
+        return hits
+
+    def get_partition_stats(self, partition_name: str) -> Dict[str, Any]:
+        """
+        Return entity count for a named Milvus partition.
+
+        Uses collection.num_entities filtered to partition.
+        Falls back to a count query if partition_name is not '_default'.
+        """
+        self._ensure_connected()
+        if not self._collection:
+            return {"partition": partition_name, "entity_count": 0}
+
+        try:
+            # Milvus Partition.num_entities is the authoritative source
+            if self._collection.has_partition(partition_name):
+                part = self._collection.partition(partition_name)
+                part.load()
+                entity_count = part.num_entities
+            else:
+                entity_count = 0
+
+            return {
+                "partition":    partition_name,
+                "entity_count": entity_count,
+            }
+        except Exception as e:
+            return {"partition": partition_name, "entity_count": -1, "error": str(e)}
+
+    
