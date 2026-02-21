@@ -209,3 +209,63 @@ def get_zombie_threshold(config: Dict[str, Any]) -> float:
 def get_maintenance_check_interval(config: Dict[str, Any]) -> float:
     """Get interval for maintenance (drift/zombie) checks."""
     return get_workload_config(config).get("maintenance_check_interval", 10.0)
+
+# =============================================================================
+# FILTERED ANN WORKLOAD HELPERS
+# =============================================================================
+
+def get_filter_selectivity(config: Dict[str, Any]) -> float:
+    """Target fraction of vectors satisfying the filter."""
+    return get_workload_config(config).get("filter_selectivity", 0.1)
+
+
+def get_post_filter_threshold(config: Dict[str, Any]) -> float:
+    """
+    Tau threshold for post-filter optimization.
+    Default mirrors workload code (tau) while staying close to schema intent.
+    """
+    return get_workload_config(config).get("post_filter_threshold", 0.05)
+
+
+def get_query_limit(config: Dict[str, Any]) -> int:
+    """Limit query set size for expensive filtered GT calculation."""
+    return get_workload_config(config).get("query_limit", 1000)
+
+
+# =============================================================================
+# MULTI-MODAL WORKLOAD HELPERS
+# =============================================================================
+
+def get_embedding_mode(config: Dict[str, Any]) -> str:
+    """Get embedding space mode (unified, partitioned)."""
+    return get_workload_config(config).get("embedding_mode", "unified")
+
+
+def get_modality_mix(config: Dict[str, Any]) -> Dict[str, float]:
+    """Get dataset modality ratios."""
+    return get_workload_config(config).get("modality_mix", {"text": 1.0})
+
+
+def get_cross_modal_mode(config: Dict[str, Any]) -> str:
+    """Get cross-modal eligibility (enabled, restricted)."""
+    return get_workload_config(config).get("cross_modal_mode", "enabled")
+
+
+def get_query_modality_mix(config: Dict[str, Any]) -> Any:
+    """Get query modality ratios (optional)."""
+    return get_workload_config(config).get("query_modality_mix", None)
+
+
+def get_hybrid_scoring(config: Dict[str, Any]) -> bool:
+    """Get whether hybrid scoring (vector + BM25) is enabled."""
+    return bool(get_workload_config(config).get("hybrid_scoring", False))
+
+
+def get_hybrid_bm25_weight(config: Dict[str, Any]) -> float:
+    """Get the BM25 weight (w) in: final = (1-w)*vec + w*bm25."""
+    return float(get_workload_config(config).get("hybrid_bm25_weight", 0.3))
+
+
+def get_advanced_metrics(config: Dict[str, Any]) -> list:
+    """Get list of advanced metrics to compute."""
+    return get_workload_config(config).get("advanced_metrics", ["precision_at_k", "ndcg"])

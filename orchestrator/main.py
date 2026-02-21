@@ -34,23 +34,23 @@ class Orchestrator:
     def run(self) -> Dict[str, Any]:
         """
         Execute full workflow.
-        
+
         Returns:
             Dict of metrics/results
         """
         # 1. Load config
         self._load_config()
-        
+
         # 2. Initialize database connection
         self._init_db()
-        
+
         # 3. Initialize workload environment
         self._init_workload()
-        
-        # 4. Run workload (ingestion + queries)
-        results = self._execute_workload()
-        
-        return results
+
+        # 4. Run workload (ingestion + queries) + optional monitoring
+        results, monitor = self._execute_workload()
+
+        return results, monitor
     
     # =========================================================================
     # CONFIG
@@ -154,18 +154,34 @@ class Orchestrator:
     # =========================================================================
     
     def _execute_workload(self) -> Dict[str, Any]:
-        """Run the workload."""
+        """Run the workload, optionally monitored."""
+        from orchestrator.operations.plotting import generate_plots
+
+        monitor_enabled = self.config.get("global", {}).get("monitor_system", False)
+        monitor = None
+
+        if monitor_enabled:
+            from orchestrator.operations.system_monitor import SystemMonitor
+            db_pid = self.config.get("workload", {}).get("db_pid")
+            monitor = SystemMonitor(db_pid=db_pid)
+            monitor.start()
+            print("[Orchestrator] System monitor started.")
+
         print("[Orchestrator] Starting workload execution...")
-        
-        # Pass full config to workload
-        # Workload handles: load data, normalize, ingest, query, collect metrics
         results = self.workload_module.run_workload(
             config=self.config,
             adapter=self.adapter
         )
-        
+
+        if monitor is not None:
+            sys_stats = monitor.stop()
+            results["system_metrics"] = sys_stats
+            print(f"[Orchestrator] System monitor stopped. "
+                  f"CPU mean={sys_stats.get('cpu_sys_pct_mean', 0):.1f}%, "
+                  f"RAM peak={sys_stats.get('mem_sys_mb_max', 0):.0f}MB")
+
         print("[Orchestrator] Workload completed")
-        return results
+        return results, monitor
     
     # =========================================================================
     # CLEANUP
@@ -204,33 +220,43 @@ def main(config_path: Optional[str] = None) -> Dict[str, Any]:
         config_path = sys.argv[1]
     
     orchestrator = Orchestrator(config_path)
-    
+
     try:
-        results = orchestrator.run()
-        
-        # Save results to JSON file
+        results, monitor = orchestrator.run()
+
+        # Save results JSON
         results_dir = PROJECT_ROOT / "results"
         results_dir.mkdir(exist_ok=True)
-        
+
         config_name = Path(config_path).stem
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        results_file = results_dir / f"{config_name}_{timestamp}.json"
-        
-        # Include config metadata in output
+        timestamp   = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_id      = f"{config_name}_{timestamp}"
+        results_file = results_dir / f"{run_id}.json"
+
         output = {
-            "config": config_name,
+            "config":    config_name,
             "timestamp": timestamp,
-            "results": results
+            "results":   results,
         }
-        
+
         with open(results_file, "w") as f:
             json.dump(output, f, indent=2)
-        
+
         print(f"\n[Orchestrator] Results saved to: {results_file}")
-        
+
+        # Automated plots (always runs; skips gracefully if matplotlib missing)
+        from orchestrator.operations.plotting import generate_plots
+        plot_dir = results_dir / run_id
+        generate_plots(
+            stats     = results,
+            latencies = results.get("_raw_latencies", []),
+            output_dir = plot_dir,
+            monitor_timeline = monitor.timeline if monitor else None,
+        )
+
     finally:
         orchestrator._cleanup()
-    
+
     return results
 
 

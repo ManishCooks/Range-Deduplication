@@ -26,6 +26,9 @@ class WorkloadType(str, Enum):
     COMPLETE_INGESTION_WORKLOAD = "complete_ingestion_workload"
     CONCURRENT_INGESTION_WORKLOAD = "concurrent_ingestion_workload"
     RWD_WORKLOAD = "rwd_workload"
+    BURST_RWD_WORKLOAD = "burst_rwd_workload"
+    FILTERED_ANN_WORKLOAD = "filtered_ann_workload"
+    MULTI_MODAL_WORKLOAD = "multi_modal_workload"
     
     @classmethod
     def _missing_(cls, value):
@@ -92,7 +95,7 @@ class CommonWorkloadKnobs(BaseModel):
 # Complete ingestion workload knobs
 class CompleteIngestionWorkloadKnobs(CommonWorkloadKnobs):
     type: Literal["complete_ingestion_workload"] = "complete_ingestion_workload"
-    # Add any specific knobs for complete ingestion here
+
 
 # Concurrent ingestion workload knobs
 class ConcurrentIngestionWorkloadKnobs(CommonWorkloadKnobs):
@@ -130,9 +133,99 @@ class RwdWorkloadKnobs(CommonWorkloadKnobs):
     drift_metric_type: Literal["mmd", "centroid"] = Field(default="mmd")
     mmd_kernel_bandwidth: float = Field(default=1.0, gt=0)
 
+
+class BurstRwdWorkloadKnobs(CommonWorkloadKnobs):
+    """Knobs for Burst Read-Write-Delete Workload."""
+    type: Literal["burst_rwd_workload"] = "burst_rwd_workload"
+
+    initial_ingest_ratio: float = Field(default=0.5, ge=0, le=1)
+
+    # Baseline RWD ratios
+    read_ratio: float = Field(default=0.7, ge=0)
+    write_ratio: float = Field(default=0.2, ge=0)
+    delete_ratio: float = Field(default=0.1, ge=0)
+
+    # Burst pattern configuration
+    burst_pattern: Literal["periodic", "sinusoidal", "step_function", "random"] = Field(default="periodic")
+    burst_amplitude: float = Field(default=5.0, gt=1.0)
+    burst_read_amplifier: float = Field(default=2.0, ge=1.0)
+    burst_duration: float = Field(default=10.0, gt=0)
+    burst_interval: float = Field(default=30.0, gt=0)
+    cooldown_interval: float = Field(default=15.0, ge=0)
+    num_bursts: int = Field(default=3, ge=1)
+    recovery_threshold: float = Field(default=1.2, gt=1.0)
+    recovery_timeout: float = Field(default=30.0, gt=0)
+
+    # Op ratios during burst (separate from baseline)
+    burst_write_ratio: float = Field(default=0.8, ge=0)
+    burst_delete_ratio: float = Field(default=0.2, ge=0)
+
+    # Timing
+    frequency_seconds: float = Field(default=2.0, gt=0)
+    query_batch_size: int = Field(default=100, ge=1)
+    max_duration_seconds: float = Field(default=0.0, ge=0)
+
+    # Maintenance
+    maintenance_check_interval: float = Field(default=5.0, gt=0)
+    drift_threshold: float = Field(default=0.05, ge=0)
+    zombie_threshold: float = Field(default=0.15, ge=0, le=1)
+    drift_metric_type: Literal["mmd", "centroid"] = Field(default="mmd")
+    mmd_kernel_bandwidth: float = Field(default=1.0, gt=0)
+
+
+class FilteredAnnWorkloadKnobs(CommonWorkloadKnobs):
+    """
+    Knobs for Filtered ANN Workload.
+    Supports selectivity, post-filter thresholds, and concurrency overrides.
+    """
+    type: Literal["filtered_ann_workload"] = "filtered_ann_workload"
+    
+    # Workload-Specific Knobs
+    filter_selectivity: float = Field(default=0.1, ge=0.0, le=1.0, description="Target fraction of vectors satisfying the filter")
+    post_filter_threshold: float = Field(default=0.0, ge=0.0, description="Tau (τ) threshold for post-filtering optimization")
+    
+    # Overrides/Extensions
+    concurrency: int = Field(default=4, ge=1, description="Concurrency level for filtered queries")
+    query_limit: int = Field(default=1000, ge=1, description="Limit query set size for expensive ground truth calculation")
+
+class MultiModalWorkloadKnobs(CommonWorkloadKnobs):
+    type: Literal["multi_modal_workload"] = "multi_modal_workload"
+    
+    # "unified" : One single collection/index that holds every vector regardless of modality.
+    # "partitioned" : One collection but physically split into multiple partitions (or separate collections) — one partition per modality
+
+    # 1. Embedding Space Mode
+    embedding_mode: Literal["unified", "partitioned"] = Field(default="unified")
+    
+    # 2. Modality Config (The "Database-side" mix)
+    # Defines the ratio of vectors for each modality in the dataset
+    modality_mix: Dict[str, float] = Field(default={"text": 1.0})
+    
+    # 3. Cross-Modal Eligibility
+    # "enabled": Queries retrieve best matches regardless of modality
+    # "restricted": Queries only retrieve matches from their own modality
+    cross_modal_mode: Literal["enabled", "restricted"] = Field(default="enabled")
+    
+    # 4. Query Mix
+    # If not provided, assumes query distribution matches dataset distribution
+    query_modality_mix: Optional[Dict[str, float]] = None
+
+    # 5. Hybrid Scoring (vector + BM25 tag match)
+    # Combined final_score = (1 - w)*vector_score + w*bm25_score
+    hybrid_scoring: bool = Field(default=False)
+    hybrid_bm25_weight: float = Field(default=0.3, ge=0.0, le=1.0)
+
+    # 6. Advanced Metrics
+    # Options: "precision_at_k", "ndcg", "latency_per_modality", "size_per_partition"
+    advanced_metrics: List[str] = Field(default=["precision_at_k", "ndcg"])
+
+
 # Union of all workload types
 WorkloadConfig = Union[
     CompleteIngestionWorkloadKnobs,
     ConcurrentIngestionWorkloadKnobs,
     RwdWorkloadKnobs,
+    BurstRwdWorkloadKnobs,
+    FilteredAnnWorkloadKnobs,
+    MultiModalWorkloadKnobs
 ]
