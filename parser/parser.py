@@ -269,3 +269,101 @@ def get_hybrid_bm25_weight(config: Dict[str, Any]) -> float:
 def get_advanced_metrics(config: Dict[str, Any]) -> list:
     """Get list of advanced metrics to compute."""
     return get_workload_config(config).get("advanced_metrics", ["precision_at_k", "ndcg"])
+
+
+# =============================================================================
+# HOT-COLD WORKLOAD HELPERS
+# =============================================================================
+
+def get_distribution(config: Dict[str, Any]) -> str:
+    """Get query sampling distribution (bernoulli, zipfian, gaussian)."""
+    return get_workload_config(config).get("distribution", "bernoulli")
+
+
+def get_hot_fraction(config: Dict[str, Any]) -> float:
+    """Get fraction of base vectors designated as hot."""
+    return get_workload_config(config).get("hot_fraction", 0.1)
+
+
+def get_hot_query_ratio(config: Dict[str, Any]) -> float:
+    """Get P(query -> hot set) for bernoulli distribution mode."""
+    return get_workload_config(config).get("hot_query_ratio", 0.8)
+
+
+def get_zipf_exponent(config: Dict[str, Any]) -> float:
+    """Get Zipf exponent s in P(rank=i) ∝ i^(-s)."""
+    return get_workload_config(config).get("zipf_exponent", 1.2)
+
+
+def get_gaussian_sigma(config: Dict[str, Any]) -> float:
+    """Get Gaussian noise std-dev per dim; None defaults to 1/dim."""
+    return get_workload_config(config).get("gaussian_sigma", None)
+
+
+def get_n_queries(config: Dict[str, Any]) -> int:
+    """Get total number of queries to issue in hot-cold workload."""
+    return get_workload_config(config).get("n_queries", 10000)
+
+
+def get_export_histogram(config: Dict[str, Any]) -> bool:
+    """Get whether to include per-vector access counts in results."""
+    return bool(get_workload_config(config).get("export_histogram", False))
+
+
+# =============================================================================
+# BURST RWD WORKLOAD HELPERS
+# =============================================================================
+
+def get_burst_pattern(config: Dict[str, Any]) -> str:
+    """Get burst pattern type (periodic, sinusoidal, step_function, random)."""
+    return get_workload_config(config).get("burst_pattern", "periodic")
+
+
+def get_burst_amplitude(config: Dict[str, Any]) -> float:
+    """Get burst amplitude multiplier for mutation rate."""
+    return float(get_workload_config(config).get("burst_amplitude", 5.0))
+
+
+def get_burst_read_amplifier(config: Dict[str, Any]) -> float:
+    """Get read concurrency multiplier during burst phase."""
+    return float(get_workload_config(config).get("burst_read_amplifier", 2.0))
+
+
+def get_burst_duration(config: Dict[str, Any]) -> float:
+    """Get duration of each burst phase in seconds."""
+    return float(get_workload_config(config).get("burst_duration", 10.0))
+
+
+def get_burst_interval(config: Dict[str, Any]) -> float:
+    """Get time between burst start events in seconds."""
+    return float(get_workload_config(config).get("burst_interval", 30.0))
+
+
+def get_cooldown_interval(config: Dict[str, Any]) -> float:
+    """Get cooldown period (read-only, no mutations) after each burst in seconds."""
+    return float(get_workload_config(config).get("cooldown_interval", 15.0))
+
+
+def get_num_bursts(config: Dict[str, Any]) -> int:
+    """Get number of burst cycles to execute."""
+    return int(get_workload_config(config).get("num_bursts", 3))
+
+
+def get_recovery_threshold(config: Dict[str, Any]) -> float:
+    """Get latency multiplier threshold that signals recovery from burst."""
+    return float(get_workload_config(config).get("recovery_threshold", 1.2))
+
+
+def get_recovery_timeout(config: Dict[str, Any]) -> float:
+    """Get max time to wait for recovery before moving on, in seconds."""
+    return float(get_workload_config(config).get("recovery_timeout", 30.0))
+
+
+def get_burst_write_ratio(config: Dict[str, Any]) -> float:
+    """Get write fraction of mutations during burst phase."""
+    return float(get_workload_config(config).get("burst_write_ratio", 0.8))
+
+
+def get_burst_delete_ratio(config: Dict[str, Any]) -> float:
+    """Get delete fraction of mutations during burst phase."""
+    return float(get_workload_config(config).get("burst_delete_ratio", 0.2))

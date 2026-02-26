@@ -29,6 +29,7 @@ class WorkloadType(str, Enum):
     BURST_RWD_WORKLOAD = "burst_rwd_workload"
     FILTERED_ANN_WORKLOAD = "filtered_ann_workload"
     MULTI_MODAL_WORKLOAD = "multi_modal_workload"
+    HOT_COLD_WORKLOAD = "hot_cold_workload"
     
     @classmethod
     def _missing_(cls, value):
@@ -219,6 +220,45 @@ class MultiModalWorkloadKnobs(CommonWorkloadKnobs):
     # Options: "precision_at_k", "ndcg", "latency_per_modality", "size_per_partition"
     advanced_metrics: List[str] = Field(default=["precision_at_k", "ndcg"])
 
+class HotColdWorkloadKnobs(CommonWorkloadKnobs):
+    """
+    Knobs for the Hot-Cold / Zipf / Gaussian workload.
+    Simulates non-uniform (power-law) query traffic to stress the DB cache.
+    """
+    type: Literal["hot_cold_workload"] = "hot_cold_workload"
+
+    # Distribution mode
+    distribution: Literal["bernoulli", "zipfian", "gaussian"] = Field(
+        default="bernoulli",
+        description="Query sampling distribution"
+    )
+
+    # Hot-set definition
+    hot_fraction: float = Field(default=0.1, gt=0, lt=1,
+        description="Fraction of base vectors designated as hot")
+
+    # Bernoulli knob
+    hot_query_ratio: float = Field(default=0.8, ge=0, le=1,
+        description="P(query -> hot set) for bernoulli mode")
+
+    # Zipfian knob
+    zipf_exponent: float = Field(default=1.2, gt=0,
+        description="s in P(rank=i) proportional to i^(-s)")
+
+    # Gaussian knobs
+    gaussian_sigma: Optional[float] = Field(default=None, gt=0,
+        description="Noise std-dev per dim; defaults to 1/dim if None")
+
+    # Query volume
+    n_queries: int = Field(default=10000, ge=1,
+        description="Total number of queries to issue")
+    query_batch_size: int = Field(default=500, ge=1,
+        description="Queries issued per concurrent batch")
+
+    # Output
+    export_histogram: bool = Field(default=False,
+        description="Include per-vector access counts in results")
+
 
 # Union of all workload types
 WorkloadConfig = Union[
@@ -227,5 +267,6 @@ WorkloadConfig = Union[
     RwdWorkloadKnobs,
     BurstRwdWorkloadKnobs,
     FilteredAnnWorkloadKnobs,
-    MultiModalWorkloadKnobs
+    MultiModalWorkloadKnobs,
+    HotColdWorkloadKnobs,
 ]
