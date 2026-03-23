@@ -318,6 +318,12 @@ class MilvusAdapter(DatabaseAdapter):
                     search_params["params"] = {}
             else:
                 search_params["params"] = {}
+                
+            # Add range search parameters if provided (for outlier workload)
+            if "radius" in params and params["radius"] is not None:
+                search_params["params"]["radius"] = params["radius"]
+            if "range_filter" in params and params["range_filter"] is not None:
+                search_params["params"]["range_filter"] = params["range_filter"]
             
             results = self._collection.search(
                 data=[query_vector],

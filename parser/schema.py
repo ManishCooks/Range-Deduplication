@@ -4,7 +4,7 @@ Config Schema - Data models for configuration.
 
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Union
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 def normalize_to_underscore(name: str) -> str:
@@ -30,6 +30,11 @@ class WorkloadType(str, Enum):
     FILTERED_ANN_WORKLOAD = "filtered_ann_workload"
     MULTI_MODAL_WORKLOAD = "multi_modal_workload"
     HOT_COLD_WORKLOAD = "hot_cold_workload"
+    OOD_INGESTION_WORKLOAD = "ood_ingestion_workload"
+    OUTLIER_WORKLOAD = "outlier_workload"
+    SPARSE_WORKLOAD = "sparse_workload"
+    COLD_START_WORKLOAD = "cold_start_workload"
+    LID_WORKLOAD = "lid_workload"
     
     @classmethod
     def _missing_(cls, value):
@@ -54,12 +59,23 @@ class MetricType(str, Enum):
 # CONFIG MODELS
 # =============================================================================
 
+class PineconeConfig(BaseModel):
+    """Pinecone Serverless connection settings."""
+    index_name: str = Field(default="dynavec-index")
+    dimension: int = Field(default=128, ge=1)
+    metric: Literal["cosine", "euclidean", "dotproduct"] = Field(default="cosine")
+    cloud: Literal["aws", "gcp", "azure"] = Field(default="aws")
+    region: str = Field(default="us-east-1")
+    namespace: str = Field(default="")
+
+
 class DatabaseConfig(BaseModel):
     """Database connection settings."""
     adapter: str = Field(default="mock")
     host: str = Field(default="localhost")
     port: int = Field(default=19530)
     collection: str = Field(default="default")
+    pinecone_config: Optional[PineconeConfig] = Field(default=None)
 
 
 class QuantizationConfig(BaseModel):
@@ -260,6 +276,215 @@ class HotColdWorkloadKnobs(CommonWorkloadKnobs):
         description="Include per-vector access counts in results")
 
 
+class OodIngestionWorkloadKnobs(CommonWorkloadKnobs):
+    """
+    Knobs for the OOD (Out-of-Distribution) Ingestion Read-Only Workload.
+    Uses LID-verified synthesis to generate OOD queries that escape the
+    data manifold, then mixes them with in-distribution queries.
+    """
+    type: Literal["ood_ingestion_workload"] = "ood_ingestion_workload"
+
+    # OOD query mixing
+    ood_fraction: float = Field(default=0.2, ge=0, le=1,
+        description="Fraction of query set that is OOD")
+    ood_mix_ratio: float = Field(default=0.3, ge=0, le=1,
+        description="Fraction of each batch that is OOD (Amt)")
+    querying_pattern: Literal["uniform", "burst"] = Field(default="uniform",
+        description="How OOD queries are interleaved with ID queries")
+    burst_size: int = Field(default=50, ge=1,
+        description="OOD queries per burst block (burst mode only)")
+
+    # Query volume
+    n_queries: int = Field(default=5000, ge=1,
+        description="Total number of queries to issue")
+    query_batch_size: int = Field(default=200, ge=1,
+        description="Queries per concurrent batch")
+
+    # OOD Synthesis — Phase 1: Boundary identification
+    ood_boundary_percentile: float = Field(default=95.0, ge=0, le=100,
+        description="k-NN distance percentile cutoff for boundary set")
+    ood_k: int = Field(default=20, ge=2,
+        description="k for kNN in boundary detection and LID computation")
+
+    # OOD Synthesis — Phase 2: Geometric push
+    ood_gamma: float = Field(default=2.0, gt=0,
+        description="Step-size for outward push along boundary trajectory")
+    ood_sigma: Optional[float] = Field(default=None, gt=0,
+        description="Noise scale for isotropic perturbation; None = auto")
+
+    # OOD Synthesis — Phase 3 & 4: LID filter
+    ood_lid_threshold: Optional[float] = Field(default=None, gt=0,
+        description="LID acceptance threshold tau; None = auto")
+    ood_max_retries: int = Field(default=10, ge=1,
+        description="Max retries per seed before force-accept")
+
+    # Output
+    export_ood_freq: bool = Field(default=False,
+        description="Include per-vector OOD hit counts in results")
+
+
+class OutlierWorkloadKnobs(CommonWorkloadKnobs):
+    """
+    Knobs for the Outlier Read Workload.
+    Combines k-NN with Range/Radius Search (epsilon).
+    Outlier queries are synthesized via NPOS (Tao et al., ICLR 2023).
+    All k-NN lookups during synthesis use a local FAISS ShadowIndex to
+    avoid O(B x N) distance matrices.
+    """
+    type: Literal["outlier_workload"] = "outlier_workload"
+
+    # Query search parameters
+    epsilon: float = Field(
+        default=0.5, ge=0.0,
+        description="Distance/radius threshold for range search")
+    range_filter: Optional[float] = Field(
+        default=None,
+        description="Optional lower bound for range search distance")
+
+    # Query volume
+    n_queries: int = Field(default=1000, ge=1,
+        description="Total normal queries to issue")
+    query_batch_size: int = Field(default=100, ge=1,
+        description="Queries per concurrent batch")
+
+    # Outlier budget
+    outlier_ratio: float = Field(default=0.05, gt=0.0, le=1.0,
+        description=(
+            "Fraction of n_queries to synthesize as outlier probes. "
+            "e.g. 0.05 -> 50 outliers for n_queries=1000"))
+
+    # NPOS synthesis knobs (paper: Tao et al., ICLR 2023)
+    k_boundary: int = Field(default=300, ge=1,
+        description=(
+            "k for d_k(z, Z) boundary scoring and best-of-p selection (Eq. 4). "
+            "Paper default: 300-400"))
+    boundary_ratio: float = Field(default=0.1, gt=0.0, le=1.0,
+        description="Fraction of boundary_sample_size kept as boundary vectors")
+    sigma: float = Field(default=0.316, gt=0.0,
+        description=(
+            "sigma for isotropic Gaussian v ~ N(h(x_i), sigma^2 I) (Eq. 5). "
+            "Paper reports sigma^2; supply sigma here. Paper default: sigma^2=0.1 -> sigma~0.316"))
+    p_candidates: int = Field(default=1000, ge=1,
+        description=(
+            "Candidates drawn per boundary sample before best-of-p selection. "
+            "Paper default: 1000 (Table 12)"))
+    boundary_sample_size: int = Field(default=5000, ge=1,
+        description="Base vectors sampled for boundary scoring (Phase 1)")
+
+class SparseWorkloadKnobs(CommonWorkloadKnobs):
+    """
+    Knobs for the Sparse Workload.
+    Tests system behaviour under low utilization (continuous low-QPS).
+    """
+    type: Literal["sparse_workload"] = "sparse_workload"
+    
+    target_qps: float = Field(default=0.5, gt=0.0, description="Target average Queries Per Second")
+    traffic_pattern: Literal["poisson", "fixed"] = Field(default="poisson", description="Inter-arrival time distribution")
+    duration_seconds: Optional[float] = Field(default=None, description="Optional cap on how long the benchmark runs")
+    n_queries: int = Field(default=1000, ge=1, description="Total number of queries to issue")
+    query_batch_size: int = Field(default=1, ge=1, description="Typically 1 for sparse to see individual latencies")
+
+
+class ColdStartWorkloadKnobs(CommonWorkloadKnobs):
+    """
+    Knobs for the Cold-Start Workload.
+    Measures cold-start query latency by cycling between query bursts
+    and forced DB restarts (Docker) or sleep periods (serverless).
+    """
+    type: Literal["cold_start_workload"] = "cold_start_workload"
+
+    # Restart mode
+    restart_mode: Literal["docker", "sleep"] = Field(
+        default="sleep",
+        description="'docker' restarts a container; 'sleep' simulates serverless idle"
+    )
+    docker_containers: Optional[List[str]] = Field(
+        default=None,
+        description="List of Docker container names/IDs to restart (e.g. etcd, minio, standalone)"
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _compat_docker_container(cls, values):
+        """Accept legacy singular 'docker_container' and promote to list."""
+        if isinstance(values, dict):
+            singular = values.pop("docker_container", None)
+            if singular and not values.get("docker_containers"):
+                values["docker_containers"] = [singular]
+        return values
+
+    docker_restart_timeout_s: float = Field(
+        default=120.0, gt=0,
+        description="Seconds to wait for container health after docker restart"
+    )
+    sleep_duration_seconds: float = Field(
+        default=300.0, gt=0,
+        description="Sleep timer (seconds) for serverless cold-start simulation"
+    )
+    queries_per_cycle: int = Field(
+        default=50, ge=1,
+        description="Number of queries per active burst after each restart"
+    )
+    num_cycles: int = Field(
+        default=5, ge=1,
+        description="Total number of restart → query cycles"
+    )
+    n_queries: int = Field(
+        default=10000, ge=1,
+        description="Hard cap on total queries across all cycles"
+    )
+    warmup_track_n: int = Field(
+        default=20, ge=1,
+        description="Number of queries to track in warmup curve per cycle"
+    )
+
+
+
+class LidWorkloadKnobs(CommonWorkloadKnobs):
+    """
+    Knobs for the LID-Aware RWD Workload.
+    Layers Local Intrinsic Dimensionality awareness onto the RWD pipeline:
+    LID-sorted ingestion, KS-test drift detection, and LID-ordered reindex.
+    """
+    type: Literal["lid_workload"] = "lid_workload"
+
+    initial_ingest_ratio: float = Field(default=0.5, ge=0, le=1)
+
+    read_ratio: float = Field(default=0.7, ge=0)
+    write_ratio: float = Field(default=0.2, ge=0)
+    delete_ratio: float = Field(default=0.1, ge=0)
+
+    frequency_seconds: float = Field(default=5.0, gt=0)
+    query_batch_size: int = Field(default=100, ge=1)
+    max_duration_seconds: float = Field(default=0.0, ge=0)
+
+    maintenance_check_interval: float = Field(default=10.0, gt=0)
+    drift_threshold: float = Field(default=0.1, ge=0)
+    zombie_threshold: float = Field(default=0.15, ge=0, le=1)
+    drift_metric_type: Literal["mmd", "centroid", "lid_ks"] = Field(default="lid_ks")
+    mmd_kernel_bandwidth: float = Field(default=1.0, gt=0)
+
+    # LID-specific knobs
+    insertion_order: Literal["desc", "asc", "random"] = Field(
+        default="desc",
+        description="Sort order for bulk ingestion by LID score")
+    lid_k: int = Field(
+        default=100, ge=2,
+        description="k for Hill MLE LID estimation")
+    lid_sample_size: int = Field(
+        default=0, ge=0,
+        description="Sample size for LID scoring during ingestion (0 = all)")
+    lid_drift_window: int = Field(
+        default=200, ge=10,
+        description="Write LID scores to accumulate before KS-test")
+    reindex_lid_ordered: bool = Field(
+        default=True,
+        description="Sort live vectors by LID descending during reindex")
+    reindex_lid_k: int = Field(
+        default=50, ge=2,
+        description="k for LID recomputation during reindex")
+
+
 # Union of all workload types
 WorkloadConfig = Union[
     CompleteIngestionWorkloadKnobs,
@@ -269,4 +494,9 @@ WorkloadConfig = Union[
     FilteredAnnWorkloadKnobs,
     MultiModalWorkloadKnobs,
     HotColdWorkloadKnobs,
+    OodIngestionWorkloadKnobs,
+    OutlierWorkloadKnobs,
+    SparseWorkloadKnobs,
+    ColdStartWorkloadKnobs,
+    LidWorkloadKnobs,
 ]

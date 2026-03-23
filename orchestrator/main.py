@@ -97,11 +97,17 @@ class Orchestrator:
         db_config = self.global_config_model.database
         print(f"[Orchestrator] Connecting to {db_config.adapter}://{db_config.host}:{db_config.port}")
 
+        # Forward pinecone_config if present
+        extra_kwargs = {}
+        if db_config.adapter in ("pinecone", "pinecone_serverless") and hasattr(db_config, "pinecone_config") and db_config.pinecone_config:
+            extra_kwargs["pinecone_config"] = db_config.pinecone_config.model_dump()
+
         self.adapter = get_adapter(
             adapter_type=db_config.adapter,
             host=db_config.host,
             port=db_config.port,
-            collection=db_config.collection
+            collection=db_config.collection,
+            **extra_kwargs,
         )
         self.adapter.connect()
         print("[Orchestrator] Database connected")
@@ -244,7 +250,7 @@ def main(config_path: Optional[str] = None) -> Dict[str, Any]:
 
         print(f"\n[Orchestrator] Results saved to: {results_file}")
 
-        # Automated plots (always runs; skips gracefully if matplotlib missing)
+       
         from orchestrator.operations.plotting import generate_plots
         plot_dir = results_dir / run_id
         generate_plots(
