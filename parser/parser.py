@@ -60,14 +60,23 @@ def get_concurrency(config: Dict[str, Any]) -> int:
     return get_global_config(config).get("concurrency", 4)
 
 
-def get_batch_size(config: Dict[str, Any]) -> int:
+def get_batch_size(config: Dict[str, Any]) -> int: 
     """Get batch size from global."""
     return get_global_config(config).get("batch_size", 1000)
+
+
+def get_query_batch_size(config: Dict[str, Any]) -> int:
+    """Get query batch size from global."""
+    return get_global_config(config).get("query_batch_size", 500)
 
 
 def get_vector_dimension(config: Dict[str, Any]) -> int:
     """Get vector dimension from global."""
     return get_global_config(config).get("vector_dimension", 128)
+
+def get_drop_collection_first(config: Dict[str, Any]) -> bool:
+    """Get whether to drop collection first from global."""
+    return get_global_config(config).get("drop_collection_first", True)
 
 
 # =============================================================================
@@ -582,3 +591,123 @@ def get_reindex_lid_ordered(config: Dict[str, Any]) -> bool:
 def get_reindex_lid_k(config: Dict[str, Any]) -> int:
     """Get k for LID recomputation during reindex (can be smaller for speed). Default 50."""
     return int(get_workload_config(config).get("reindex_lid_k", 50))
+
+# =============================================================================
+# DEDUPLICATION WORKLOAD HELPERS
+# =============================================================================
+
+def get_top_k(config: Dict[str, Any]) -> int:
+    """Get top-k for deduplication search."""
+    return int(get_workload_config(config).get("top_k", 1))
+
+def get_num_perm(config: Dict[str, Any]) -> int:
+    """Get number of permutations for MinHash LSH."""
+    return int(get_workload_config(config).get("num_perm", 128))
+
+
+def get_jaccard_threshold(config: Dict[str, Any]) -> float:
+    """Get Jaccard similarity threshold for deduplication."""
+    return float(get_workload_config(config).get("jaccard_threshold", 0.8))
+
+
+def get_bloom_capacity(config: Dict[str, Any]) -> int:
+    """Get estimated number of unique items for Bloom Filter."""
+    return int(get_workload_config(config).get("bloom_capacity", 100000))
+
+
+def get_bloom_error_rate(config: Dict[str, Any]) -> float:
+    """Get accepted false positive rate for Bloom Filter."""
+    return float(get_workload_config(config).get("bloom_error_rate", 0.01))
+
+
+# =============================================================================
+# OOD WORKLOAD HELPERS
+# =============================================================================
+
+def get_ingestion_ratio(config: Dict[str, Any]) -> float:
+    """Get ingestion ratio for OOD workload."""
+    return float(get_workload_config(config).get("ingestion_ratio", 1.0))
+
+
+def get_id_query_ratio(config: Dict[str, Any]) -> float:
+    """Get ID query ratio for OOD workload."""
+    return float(get_workload_config(config).get("id_query_ratio", 0.5))
+
+
+def get_total_queries(config: Dict[str, Any]) -> int:
+    """Get total number of queries for OOD workload."""
+    return int(get_workload_config(config).get("total_queries", 10000))
+
+
+def get_ood_query_ratio(config: Dict[str, Any]) -> float:
+    """Get OOD query ratio for OOD workload."""
+    return float(get_workload_config(config).get("ood_query_ratio", 0.5))
+
+
+# =============================================================================
+# OOD PREPROCESSOR HELPERS
+# =============================================================================
+
+def get_preprocessor_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract the preprocessor section from the config."""
+    return config.get("preprocessor", {})
+
+
+def get_preprocessor_datasets(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Get the datasets sub-config."""
+    return get_preprocessor_config(config).get("datasets", {})
+
+
+def get_preprocessor_id_pool(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Get the ID pool sub-config."""
+    return get_preprocessor_datasets(config).get("id", {})
+
+
+def get_preprocessor_ood_pool(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Get the OOD pool sub-config."""
+    return get_preprocessor_datasets(config).get("ood", {})
+
+
+def get_preprocessor_model(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Get the model sub-config."""
+    return get_preprocessor_config(config).get("model", {})
+
+
+def get_preprocessor_model_backbone(config: Dict[str, Any]) -> str:
+    """Get the model backbone."""
+    return get_preprocessor_model(config).get("backbone", "resnet50")
+
+
+def get_preprocessor_model_pretrained(config: Dict[str, Any]) -> bool:
+    """Get the model pretrained flag."""
+    return bool(get_preprocessor_model(config).get("pretrained", True))
+
+
+def get_preprocessor_model_epochs(config: Dict[str, Any]) -> int:
+    """Get the model epochs."""
+    return int(get_preprocessor_model(config).get("epochs", 20))
+
+
+def get_preprocessor_model_lr(config: Dict[str, Any]) -> float:
+    """Get the model learning rate."""
+    return float(get_preprocessor_model(config).get("lr", 0.001))
+
+
+def get_preprocessor_model_batch_size(config: Dict[str, Any]) -> int:
+    """Get the inference batch size for the model."""
+    return int(get_preprocessor_model(config).get("batch_size", 256))
+
+
+def get_preprocessor_model_device(config: Dict[str, Any]) -> str:
+    """Get the torch device string ('cpu', 'cuda', etc.)."""
+    return get_preprocessor_model(config).get("device", "cpu")
+
+
+def get_preprocessor_output_dir(config: Dict[str, Any]) -> str:
+    """Get the output directory for the HDF5 file."""
+    return get_preprocessor_config(config).get("output_dir", "./preprocessed_vectors")
+
+
+def get_preprocessor_distance_metric(config: Dict[str, Any]) -> str:
+    """Get the distance metric stored as metadata in the HDF5 file."""
+    return get_preprocessor_config(config).get("distance_metric", "cosine")

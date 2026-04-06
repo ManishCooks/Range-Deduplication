@@ -637,4 +637,81 @@ class MilvusAdapter(DatabaseAdapter):
         except Exception as e:
             return {"partition": partition_name, "entity_count": -1, "error": str(e)}
 
+    # =========================================================
+    # Deduplication Workload Implementation
+    # =========================================================
+
+    def create_dedup_collection(self, vector_dim: int, signature_dim: int, drop_existing: bool = True):
+        """
+        Create collection for deduplication workload with schema: [id, vector, signature].
+        signature_dim is the number of bits for the BINARY_VECTOR.
+        """
+        self._ensure_connected()
+        collection_name = self._config.collection
+        
+        if utility.has_collection(collection_name, using=self._connection_alias):
+            if drop_existing:
+                utility.drop_collection(collection_name, using=self._connection_alias)
+                print(f"[Milvus] Dropped existing collection: {collection_name}")
+            else:
+                self._collection = Collection(collection_name, using=self._connection_alias)
+                return
+
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=False),
+            FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=vector_dim),
+            FieldSchema(name="signature", dtype=DataType.BINARY_VECTOR, dim=signature_dim)
+        ]
+        
+        schema = CollectionSchema(fields=fields, description="Deduplication Collection with Signatures")
+        self._collection = Collection(name=collection_name, schema=schema, using=self._connection_alias)
+        print(f"[Milvus] Created dedup collection: {collection_name}")
+
+    def insert_dedup(self, ids: List[int], vectors: List[List[float]], signatures: List[bytes]):
+        """Batch insert into dedup collection."""
+        if not self._collection:
+            raise RuntimeError("Collection not initialized.")
+        self._collection.insert([ids, vectors, signatures])
+
+    def search_dedup_batch(self, query_signatures: List[bytes], radius: float, top_k: int = 1, params: Dict[str, Any] = None) -> List[List[Dict[str, Any]]]:
+        """
+        Batch range search on the 'signature' field.
+        Returns a list of hit lists, one per query signature.
+        """
+        if not self._collection:
+            raise RuntimeError("Collection not initialized.")
+            
+        params = params or {}
+        
+        search_params = {
+            "metric_type": "JACCARD",
+            "params": {"radius": radius}
+        }
+        
+        idx_type = self._index_params.get("index_type", "BIN_FLAT") if getattr(self, "_index_params", None) else "BIN_FLAT"
+        if idx_type in ["BIN_IVF_FLAT"]:
+            search_params["params"]["nprobe"] = params.get("nprobe", 10)
+        
+        results = self._collection.search(
+            data=query_signatures,
+            anns_field="signature",
+            param=search_params,
+            limit=top_k,
+            output_fields=["id"]
+        )
+
+        batch_hits = []
+        if results:
+            for hits in results:
+                local_hits = []
+                for hit in hits:
+                    local_hits.append({"id": hit.id, "distance": hit.distance})
+                batch_hits.append(local_hits)
+        else:
+            # If no results returned at all (shouldn't happen with valid queries)
+            batch_hits = [[] for _ in range(len(query_signatures))]
+            
+        return batch_hits
+
+
     

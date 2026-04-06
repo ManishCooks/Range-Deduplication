@@ -30,11 +30,12 @@ class WorkloadType(str, Enum):
     FILTERED_ANN_WORKLOAD = "filtered_ann_workload"
     MULTI_MODAL_WORKLOAD = "multi_modal_workload"
     HOT_COLD_WORKLOAD = "hot_cold_workload"
-    OOD_INGESTION_WORKLOAD = "ood_ingestion_workload"
     OUTLIER_WORKLOAD = "outlier_workload"
     SPARSE_WORKLOAD = "sparse_workload"
     COLD_START_WORKLOAD = "cold_start_workload"
     LID_WORKLOAD = "lid_workload"
+    DEDUPLICATION_WORKLOAD = "deduplication_workload"
+    OOD_WORKLOAD = "ood_workload"
     
     @classmethod
     def _missing_(cls, value):
@@ -53,6 +54,8 @@ class MetricType(str, Enum):
     COSINE = "cosine"
     INNER_PRODUCT = "inner_product"
     L2 = "l2"
+    JACCARD_UPPER = "JACCARD"
+    JACCARD_LOWER = "jaccard"
 
 
 # =============================================================================
@@ -95,11 +98,13 @@ class IndexConfig(BaseModel):
 class GlobalConfig(BaseModel):
     """Global settings: database, dataset, concurrency, seed."""
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
-    dataset: str
+    dataset: str = Field(default="")
     seed: int = Field(default=42)
     concurrency: int = Field(default=4, ge=1)
     batch_size: int = Field(default=1000, ge=1)
-    vector_dimension: int = Field(default=128, ge=1)
+    query_batch_size: int = Field(default=500, ge=1)
+    vector_dimension: int = Field(default=128, ge=1)    
+    drop_collection_first: bool = Field(default=True)
 
 # Common knobs for all workloads
 class CommonWorkloadKnobs(BaseModel):
@@ -484,6 +489,32 @@ class LidWorkloadKnobs(CommonWorkloadKnobs):
         default=50, ge=2,
         description="k for LID recomputation during reindex")
 
+class OodWorkloadKnobs(CommonWorkloadKnobs):
+    """
+    Knobs for the OOD (Out-of-Distribution) Evaluation Workload.
+    Reads pre-processed HDF5 embeddings to execute mixed ID/OOD queries.
+    """
+    type: Literal["ood_workload"] = "ood_workload"
+    
+    ingestion_ratio: float = Field(default=1.0, ge=0.0, le=1.0)
+    id_query_ratio: float = Field(default=0.5, ge=0.0, le=1.0)
+    ood_query_ratio: float = Field(default=0.5, ge=0.0, le=1.0)
+    total_queries: int = Field(default=10000, ge=1)
+
+class DeduplicationWorkloadKnobs(CommonWorkloadKnobs):
+    """
+    Knobs for the Deduplication Workload.
+    Two-phase deduplication using Bloom Filter and MinHash LSH.
+    """
+    type: Literal["deduplication_workload"] = "deduplication_workload"
+    
+    top_k: int = Field(default=1, ge=1)
+    num_perm: int = Field(default=128, ge=8)
+    jaccard_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
+    bloom_capacity: int = Field(default=100000, ge=1)
+    bloom_error_rate: float = Field(default=0.01, gt=0.0, lt=1.0)
+
+
 
 # Union of all workload types
 WorkloadConfig = Union[
@@ -494,9 +525,96 @@ WorkloadConfig = Union[
     FilteredAnnWorkloadKnobs,
     MultiModalWorkloadKnobs,
     HotColdWorkloadKnobs,
-    OodIngestionWorkloadKnobs,
     OutlierWorkloadKnobs,
     SparseWorkloadKnobs,
     ColdStartWorkloadKnobs,
     LidWorkloadKnobs,
+    DeduplicationWorkloadKnobs,
+    OodWorkloadKnobs,
 ]
+
+
+# =============================================================================
+# OOD PREPROCESSOR CONFIG
+# Read from the top-level "preprocessor" key in the JSON config.
+# Not part of the workload union — used by ood_workload/pipeline.py.
+# =============================================================================
+
+class PoolConfig(BaseModel):
+    """
+    Config for one pool (ID or OOD).
+
+    Two mutually exclusive modes, determined by the type of `classes`:
+
+    **Mode 1 — class-index filter** (``classes`` is a list of ints):
+        Load ``dataset`` and keep only samples whose class label is in the list.
+        Example: ``{"dataset": "CIFAR10", "classes": [0, 1, 2]}``
+
+    **Mode 2 — multi-dataset** (``classes`` is a list of strings):
+        Each string is a dataset name.  All samples from every listed dataset
+        are loaded in full (no class filtering).  ``dataset`` is ignored.
+        Example: ``{"classes": ["CIFAR100", "MNIST"]}``
+    """
+    name: Optional[str] = Field(
+        default=None,
+        description="Primary dataset name ('CIFAR10', 'CIFAR100', 'ImageNet'")
+    root: str = Field(
+        default="./datasets/raw",
+        description="Local root directory for torchvision to cache/load the dataset.")
+    classes: Optional[List[Union[int, str]]] = Field(
+        default=None,
+        description=(
+                "Mode 1: list of int class indices to keep from `dataset`. "
+                "Mode 2: list of str dataset names to load entirely. "
+            )
+    )
+
+    @model_validator(mode="after")
+    def _validate_pool(self) -> "PoolConfig":
+        classes = self.classes
+
+        if classes is None or len(classes) == 0:
+            raise ValueError(
+                "PoolConfig: 'classes' must be provided and non-empty."
+            )
+
+        # Mode 1 — list[int]
+        if isinstance(classes[0], int):
+            if not self.name:
+                raise ValueError(
+                    "PoolConfig: 'name' is required when 'classes' is a list of ints."
+                )
+
+        # Mode 2 — list[str]
+        # no constraint, dataset ignored
+
+        return self
+
+
+class PreprocessorModelConfig(BaseModel):
+    backbone: str = Field(default="resnet50")
+    pretrained: bool = Field(default=True)
+    epochs: int = Field(default=20)
+    lr: float = Field(default=0.001)
+    batch_size: int = Field(default=256)
+    device: str = Field(default="cpu")
+
+
+class PreprocessorDatasetsConfig(BaseModel):
+    id: PoolConfig = Field(description="In-distribution pool settings")
+    ood: PoolConfig = Field(description="Out-of-distribution pool settings")
+
+
+class OodPreprocessorConfig(BaseModel):
+    """
+    Top-level config for the OOD preprocessor utility (ood_workload Phase 1).
+    Read from the 'preprocessor' key of the JSON config file.
+    """
+    model: PreprocessorModelConfig
+    output_dir: str = Field(
+        default="./preprocessed_vectors",
+        description="Directory where the output HDF5 file is written")
+    distance_metric: str = Field(
+        default="cosine",
+        description="Distance metric stored as metadata: 'cosine', 'l2', 'inner_product'")
+    datasets: PreprocessorDatasetsConfig

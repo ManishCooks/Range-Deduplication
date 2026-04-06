@@ -218,6 +218,20 @@ def main(config_path: Optional[str] = None) -> Dict[str, Any]:
     """
     import json
     from datetime import datetime
+    import numpy as np
+
+    class _NumpyEncoder(json.JSONEncoder):
+        """Serialize numpy scalars/arrays so json.dump never crashes mid-write."""
+        def default(self, obj):
+            if isinstance(obj, np.integer):
+                return int(obj)
+            if isinstance(obj, np.floating):
+                return float(obj)
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            if isinstance(obj, np.bool_):
+                return bool(obj)
+            return super().default(obj)
     
     if config_path is None:
         if len(sys.argv) < 2:
@@ -233,11 +247,15 @@ def main(config_path: Optional[str] = None) -> Dict[str, Any]:
         # Save results JSON
         results_dir = PROJECT_ROOT / "results"
         results_dir.mkdir(exist_ok=True)
-
+        
         config_name = Path(config_path).stem
         timestamp   = datetime.now().strftime("%Y%m%d_%H%M%S")
         run_id      = f"{config_name}_{timestamp}"
-        results_file = results_dir / f"{run_id}.json"
+        
+        output_dir = results_dir / run_id
+        output_dir.mkdir(exist_ok=True)
+
+        results_file = output_dir / "results.json"
 
         output = {
             "config":    config_name,
@@ -246,17 +264,16 @@ def main(config_path: Optional[str] = None) -> Dict[str, Any]:
         }
 
         with open(results_file, "w") as f:
-            json.dump(output, f, indent=2)
+            json.dump(output, f, indent=2, cls=_NumpyEncoder)
 
         print(f"\n[Orchestrator] Results saved to: {results_file}")
 
        
         from orchestrator.operations.plotting import generate_plots
-        plot_dir = results_dir / run_id
         generate_plots(
             stats     = results,
             latencies = results.get("_raw_latencies", []),
-            output_dir = plot_dir,
+            output_dir = output_dir,
             monitor_timeline = monitor.timeline if monitor else None,
         )
 
