@@ -321,7 +321,7 @@ def run_workload(config: Dict[str, Any], adapter) -> Dict[str, Any]:
     )
 
     metrics.update({
-        "workload":                  "ood_workload",
+        "workload":                  "deduplication_workload",
         "total_processed":           total,
         "bloom_rejected":            0,          # bloom only routes, never hard-rejects
         "lsh_rejected":              lsh_rejected,
