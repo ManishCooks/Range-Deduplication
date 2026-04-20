@@ -30,6 +30,7 @@ def run_workload(config: Dict[str, Any], adapter) -> Dict[str, Any]:
     global_config   = config["global"]
     workload_config = config.get("workload",{})
     index_config    = config.get("index",{})
+    vector_dimension = global_config.get("vector_dimension", 128)
 
     dataset_name = global_config["dataset"]
     seed         = global_config.get("seed",42)
