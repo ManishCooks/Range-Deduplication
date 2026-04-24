@@ -260,7 +260,7 @@ def main(config_path: Optional[str] = None) -> Dict[str, Any]:
         output = {
             "config":    config_name,
             "timestamp": timestamp,
-            "results":   results,
+            "results":   {k: v for k, v in results.items() if not k.startswith("_")},
         }
 
         with open(results_file, "w") as f:

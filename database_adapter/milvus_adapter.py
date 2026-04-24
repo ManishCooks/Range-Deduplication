@@ -311,7 +311,8 @@ class MilvusAdapter(DatabaseAdapter):
             if self._index_params:
                 idx_type = self._index_params.get("index_type", "")
                 if idx_type == "HNSW":
-                    search_params["params"] = {"ef": params.get("ef", params.get("ef_search", 100))}
+                    actual_ef = params.get("ef", params.get("ef_search", 100))
+                    search_params["params"] = {"ef":actual_ef}
                 elif idx_type in ["IVF_FLAT", "IVF_PQ", "IVF_SQ8"]:
                     search_params["params"] = {"nprobe": params.get("nprobe", 10)}
                 else:
