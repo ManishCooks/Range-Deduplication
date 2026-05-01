@@ -152,6 +152,14 @@ class Orchestrator:
         try:
             import numpy as np
             np.random.seed(seed)
+            # default_rng is seeded at point of use — documenting for convention
+        except ImportError:
+            pass
+
+        try:
+            import torch
+            torch.manual_seed(seed)
+            torch.cuda.manual_seed_all(seed)
         except ImportError:
             pass
     

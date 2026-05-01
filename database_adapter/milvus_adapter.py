@@ -258,25 +258,28 @@ class MilvusAdapter(DatabaseAdapter):
         if not self._collection:
             raise InsertError("No collection loaded. Call create_collection first.")
         
-        start = time.perf_counter()
-        
         try:
-            ids = [record["id"] for record in batch]
-            vectors = [record["vector"] for record in batch]
-            
+            ids,vectors = batch
+
+            start = time.perf_counter()
+
             self._collection.insert([ids, vectors])
             # Note: flush removed to avoid rate limiting and for speed - flush called at end of ingestion
             
-            elapsed = (time.perf_counter() - start) * 1000
+            execution_ms = (time.perf_counter() - start) * 1000
             
             return InsertResult(
-                inserted_count=len(batch),
+                inserted_count=len(vectors),
                 failed_count=0,
-                execution_time_ms=elapsed
+                execution_time_ms=execution_ms
             )
         except Exception as e:
             elapsed = (time.perf_counter() - start) * 1000
-            raise InsertError(f"Insert failed: {e}")
+            return InsertResult(        
+                inserted_count=0,
+                failed_count=len(vectors),
+                elapsed_ms=elapsed
+            )
     
     def flush(self) -> None:
         """Flush collection to persist data."""
@@ -353,6 +356,74 @@ class MilvusAdapter(DatabaseAdapter):
             )
         except Exception as e:
             raise QueryError(f"Query failed: {e}")
+    
+    def query_batch(self, vectors, k: int, params: Dict[str, Any] = None) -> List[QueryResult]:
+        """
+        Batch query - passes multiple vectors in a single Milvus search call.
+        
+        Args:
+            vectors: list of vectors or ndarray (N, D)
+            k: top-k neighbors
+            params: ef, nprobe etc.
+        """
+        self._ensure_connected()
+        if not self._collection:
+            raise QueryError("No collection loaded. Call create_collection first.")
+
+        params = params or {}
+        start = time.perf_counter()
+
+        try:
+            search_params = {"metric_type": self._metric_type}
+
+            if self._index_params:
+                idx_type = self._index_params.get("index_type", "")
+                if idx_type == "HNSW":
+                    search_params["params"] = {"ef": params.get("ef",params.get("ef_search", 100))}
+                elif idx_type in ["IVF_FLAT", "IVF_PQ", "IVF_SQ8"]:
+                    search_params["params"] = {"nprobe": params.get("nprobe", 10)}
+                else:
+                    search_params["params"] = {}
+            else:
+                search_params["params"] = {}
+
+            # Add range search parameters if provided (for outlier workload)
+            if "radius" in params and params["radius"] is not None:
+                search_params["params"]["radius"] = params["radius"]
+            if "range_filter" in params and params["range_filter"] is not None:
+                search_params["params"]["range_filter"] = params["range_filter"]
+
+            results = self._collection.search(
+                data=vectors,          # Milvus accepts (N, D) ndarray or list of lists natively
+                anns_field="vector",
+                param=search_params,
+                limit=k,
+                output_fields=["id"]
+            )
+
+            elapsed = (time.perf_counter() - start) * 1000
+
+            # One QueryResult per query vector
+            batch_results = []
+            for hits in results:
+                data = [
+                    {
+                        "id": hit.id,
+                        "distance": hit.distance,
+                        "score": -hit.distance if self._metric_type == "L2" else hit.distance
+                    }
+                    for hit in hits
+                ]
+                batch_results.append(QueryResult(
+                    data=data,
+                    total_count=self._collection.num_entities,
+                    execution_time_ms=elapsed
+                ))
+
+            return batch_results
+
+        except Exception as e:
+            raise QueryError(f"Batch query failed: {e}")
     
     def health_check(self) -> HealthStatus:
         """Check Milvus connection health."""
