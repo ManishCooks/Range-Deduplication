@@ -69,15 +69,27 @@ def get_query_batch_size(config: Dict[str, Any]) -> int:
     """Get query batch size from global."""
     return get_global_config(config).get("query_batch_size", 500)
 
-
-def get_vector_dimension(config: Dict[str, Any]) -> int:
-    """Get vector dimension from global."""
-    return get_global_config(config).get("vector_dimension", 128)
-
 def get_drop_collection_first(config: Dict[str, Any]) -> bool:
     """Get whether to drop collection first from global."""
     return get_global_config(config).get("drop_collection_first", True)
 
+def get_monitor_system(config: Dict[str, Any]) -> bool:
+    """Get whether to monitor system metrics during workload execution."""
+    return get_global_config(config).get("monitor_system", False)
+
+def get_containers(config: Dict[str, Any]) -> list:
+    """Get list of Docker container names/IDs to monitor."""
+    containers = get_global_config(config).get("containers", [])
+    if isinstance(containers, str):
+        return [containers]
+    elif isinstance(containers, list):
+        return containers
+    else:
+        raise ConfigError("Invalid 'containers' format in global config; must be string or list of strings.")
+
+def system_metrics(config: Dict[str, Any]) -> Dict[str, list]:
+    """Get dict specifying which system and docker metrics to collect."""
+    return get_global_config(config).get("system_metrics", {"system": [], "docker": []})
 
 # =============================================================================
 # INDEX CONFIG HELPERS
