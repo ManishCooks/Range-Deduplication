@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 from pydantic import TypeAdapter
+import numpy as np
 
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -164,13 +165,32 @@ class Orchestrator:
                 if key in sys_stats:
                     filtered_sys[key] = sys_stats[key]
 
+            docker_sys_stats = {}
+
+           
+            for name in container_names:
+                safe = name.replace("-", "_")
+                stats = sys_stats.get(name, {})
+
+                cpu_vals = stats.get("cpu", [])
+                mem_vals = stats.get("mem", [])
+
+                if cpu_vals:
+                    docker_sys_stats[f"docker_{safe}_cpu_pct_mean"] = np.mean(cpu_vals)
+                    docker_sys_stats[f"docker_{safe}_cpu_pct_max"] = np.max(cpu_vals)
+
+                if mem_vals:
+                    docker_sys_stats[f"docker_{safe}_mem_mb_max"] = np.max(mem_vals)
+                    docker_sys_stats[f"docker_{safe}_mem_mb_mean"] = np.mean(mem_vals)
+
             for name in container_names:
                 safe = name.replace("-", "_")
                 for metric in metrics_cfg.get("docker", []):
                     key = f"docker_{safe}_{metric}"
-                    if key in sys_stats:
-                        filtered_sys[key] = sys_stats[key]
+                    if key in docker_sys_stats:
+                        filtered_sys[key] = docker_sys_stats[key]
 
+           
             results["system_metrics"] = filtered_sys
 
         print("[Orchestrator] Workload completed")

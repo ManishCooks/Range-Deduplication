@@ -101,7 +101,7 @@ class GlobalConfig(BaseModel):
     dataset: str = Field(default="")
     seed: int = Field(default=42)
     concurrency: int = Field(default=4, ge=1)
-    batch_size: int = Field(default=1000, ge=1)
+    ingest_batch_size: int = Field(default=1500, ge=1)
     query_batch_size: int = Field(default=500, ge=1)
     vector_dimension: int = Field(default=128, ge=1)    
     drop_collection_first: bool = Field(default=True)

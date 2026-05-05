@@ -60,9 +60,9 @@ def get_concurrency(config: Dict[str, Any]) -> int:
     return get_global_config(config).get("concurrency", 4)
 
 
-def get_batch_size(config: Dict[str, Any]) -> int: 
-    """Get batch size from global."""
-    return get_global_config(config).get("batch_size", 1000)
+def get_ingest_batch_size(config: Dict[str, Any]) -> int: 
+    """Get ingest batch size from global."""
+    return get_global_config(config).get("ingest_batch_size", 1500)
 
 
 def get_query_batch_size(config: Dict[str, Any]) -> int:
