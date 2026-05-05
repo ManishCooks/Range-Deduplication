@@ -60,7 +60,7 @@ class Orchestrator:
 
         print(f"[Orchestrator] Dataset:     {self.global_config_model.dataset}")
         print(f"[Orchestrator] Concurrency: {self.global_config_model.concurrency}")
-        print(f"[Orchestrator] Batch size:  {self.global_config_model.batch_size}")
+        print(f"[Orchestrator] Ingest Batch size:  {self.global_config_model.ingest_batch_size}")
 
     # =========================================================================
     # DATABASE
@@ -135,10 +135,6 @@ class Orchestrator:
 
     def _execute_workload(self) -> Dict[str, Any]:
         """Run the workload, optionally monitored."""
-        raw_global = self.config.get("global", {})
-        print(f"[DEBUG] monitor_system = {raw_global.get('monitor_system')}")
-        print(f"[DEBUG] containers = {raw_global.get('containers')}")
-        print(f"[DEBUG] system_metrics = {raw_global.get('system_metrics')}")
         monitor_enabled = self.config.get("global", {}).get("monitor_system", False)
         container_names = self.config.get("global", {}).get("containers", [])
         metrics_cfg     = self.config.get("global", {}).get("system_metrics", {})
@@ -158,37 +154,18 @@ class Orchestrator:
 
         if monitor is not None:
             sys_stats = monitor.stop()
-            print(f"[DEBUG] sys_stats = {sys_stats}")
             filtered_sys: Dict[str, Any] = {}
 
             for key in metrics_cfg.get("system", []):
                 if key in sys_stats:
                     filtered_sys[key] = sys_stats[key]
 
-            docker_sys_stats = {}
-
-           
-            for name in container_names:
-                safe = name.replace("-", "_")
-                stats = sys_stats.get(name, {})
-
-                cpu_vals = stats.get("cpu", [])
-                mem_vals = stats.get("mem", [])
-
-                if cpu_vals:
-                    docker_sys_stats[f"docker_{safe}_cpu_pct_mean"] = np.mean(cpu_vals)
-                    docker_sys_stats[f"docker_{safe}_cpu_pct_max"] = np.max(cpu_vals)
-
-                if mem_vals:
-                    docker_sys_stats[f"docker_{safe}_mem_mb_max"] = np.max(mem_vals)
-                    docker_sys_stats[f"docker_{safe}_mem_mb_mean"] = np.mean(mem_vals)
-
             for name in container_names:
                 safe = name.replace("-", "_")
                 for metric in metrics_cfg.get("docker", []):
                     key = f"docker_{safe}_{metric}"
-                    if key in docker_sys_stats:
-                        filtered_sys[key] = docker_sys_stats[key]
+                    if key in sys_stats:
+                        filtered_sys[key] = sys_stats[key]
 
            
             results["system_metrics"] = filtered_sys
