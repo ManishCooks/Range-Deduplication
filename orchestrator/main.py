@@ -248,11 +248,10 @@ def main(config_path: Optional[str] = None) -> Dict[str, Any]:
 
             "passes": [
                 {
-                    "pass": p["pass"],
-                    "partial": p["partial"],
-                    "path": f"pass_{p['pass']}/results.json"
+                    "path": f"pass_{p['pass']}/results.json",
+                    **p
                 }
-                for p in query_results.get("passes", [])
+                for p in query_results["passes"]
             ]
         }
 
@@ -309,7 +308,7 @@ def main(config_path: Optional[str] = None) -> Dict[str, Any]:
                 stats=pass_result,
                 latencies=pass_result.get("_raw_latencies", []),
                 output_dir=pass_dir,
-                monitor_timeline=monitor.timeline if monitor else None,
+                monitor_timeline= None,
             )
    
     finally:
