@@ -30,8 +30,8 @@ class Orchestrator:
         self._load_config()
         self._init_db()
         self._init_workload()
-        results, monitor = self._execute_workload()
-        return results, monitor
+        query_results,results, monitor = self._execute_workload()
+        return query_results,results, monitor
 
     # =========================================================================
     # CONFIG
@@ -147,7 +147,7 @@ class Orchestrator:
             print("[Orchestrator] System monitor started.")
 
         print("[Orchestrator] Starting workload execution...")
-        results = self.workload_module.run_workload(
+        query_results,results = self.workload_module.run_workload(
             config=self.config,
             adapter=self.adapter
         )
@@ -171,7 +171,7 @@ class Orchestrator:
             results["system_metrics"] = filtered_sys
 
         print("[Orchestrator] Workload completed")
-        return results, monitor
+        return query_results,results, monitor
 
     # =========================================================================
     # CLEANUP
@@ -214,40 +214,104 @@ def main(config_path: Optional[str] = None) -> Dict[str, Any]:
     orchestrator = Orchestrator(config_path)
 
     try:
-        results, monitor = orchestrator.run()
+        query_results, results, monitor = orchestrator.run()
 
-        # Save results
+        # =========================================================================
+        # CREATE RUN OUTPUT DIRECTORY
+        # =========================================================================
+
         results_dir = PROJECT_ROOT / "results"
         results_dir.mkdir(exist_ok=True)
 
         config_name = Path(config_path).stem
         timestamp   = datetime.now().strftime("%Y%m%d_%H%M%S")
-        run_id      = f"{config_name}_{timestamp}"
+
+        run_id = f"{config_name}_{timestamp}"
 
         output_dir = results_dir / run_id
         output_dir.mkdir(exist_ok=True)
 
+        # =========================================================================
+        # SAVE GLOBAL RESULTS
+        # =========================================================================
+
         results_file = output_dir / "results.json"
 
-        output = {
-            "config":    config_name,
+        global_output = {
+            "config": config_name,
             "timestamp": timestamp,
-            "results":   {k: v for k, v in results.items() if not k.startswith("_")},
+
+            "results": {
+                k: v for k, v in results.items()
+                if not k.startswith("_")
+            },
+
+            "passes": [
+                {
+                    "pass": p["pass"],
+                    "partial": p["partial"],
+                    "path": f"pass_{p['pass']}/results.json"
+                }
+                for p in query_results.get("passes", [])
+            ]
         }
 
         with open(results_file, "w") as f:
-            json.dump(output, f, indent=2, cls=_NumpyEncoder)
+            json.dump(global_output, f, indent=2, cls=_NumpyEncoder)
 
-        print(f"\n[Orchestrator] Results saved to: {results_file}")
+        print(f"\n[Orchestrator] Global results saved to: {results_file}")
+
+        # =========================================================================
+        # GENERATE GLOBAL PLOTS
+        # =========================================================================
 
         from orchestrator.operations.plotting import generate_plots
+
         generate_plots(
-            stats            = results,
-            latencies        = results.get("_raw_latencies", []),
-            output_dir       = output_dir,
-            monitor_timeline = monitor.timeline if monitor else None,
+            stats=results,
+            latencies=[],
+            output_dir=output_dir,
+            monitor_timeline=monitor.timeline if monitor else None,
         )
 
+        # =========================================================================
+        # SAVE PER-PASS RESULTS + PLOTS
+        # =========================================================================
+
+        for pass_result in query_results.get("passes", []):
+
+            pass_num = pass_result["pass"]
+
+            pass_dir = output_dir / f"pass_{pass_num}"
+            pass_dir.mkdir(exist_ok=True)
+
+            pass_results_file = pass_dir / "results.json"
+
+            pass_output = {
+                "config": config_name,
+                "timestamp": timestamp,
+
+                "results": {
+                    k: v for k, v in pass_result.items()
+                    if not k.startswith("_")
+                }
+            }
+
+            with open(pass_results_file, "w") as f:
+                json.dump(pass_output, f, indent=2, cls=_NumpyEncoder)
+
+            print(
+                f"[Orchestrator] Pass {pass_num} results saved to: "
+                f"{pass_results_file}"
+            )
+
+            generate_plots(
+                stats=pass_result,
+                latencies=pass_result.get("_raw_latencies", []),
+                output_dir=pass_dir,
+                monitor_timeline=monitor.timeline if monitor else None,
+            )
+   
     finally:
         orchestrator._cleanup()
 

@@ -138,11 +138,22 @@ def get_k(config: Dict[str, Any]) -> int:
     """Get top-k for queries."""
     return get_workload_config(config).get("k", 10)
 
+def get_query_time_budget_s(config: Dict[str, Any]) -> Union[float, None]:
+    """Get optional time budget for query phase in seconds."""
+    val = get_workload_config(config).get("query_time_budget_s", None)
+    return float(val) if val is not None else None
+
+def get_query_vectors_path(config: Dict[str, Any]) -> str:
+    """Get path to separate query vectors file."""
+    return get_workload_config(config).get("query_vectors", None)
 
 def get_query_ratio(config: Dict[str, Any]) -> float:
     """Get query ratio (fraction of dataset for queries)."""
     return get_workload_config(config).get("query_ratio", 0.01)
 
+def get_query_vectors_path(config: Dict[str, Any]) -> str:
+    """Get path to separate query vectors file."""
+    return get_workload_config(config).get("query_vectors", None)
 
 def get_query_vectors_path(config: Dict[str, Any]) -> str:
     """Get path to separate query vectors file."""

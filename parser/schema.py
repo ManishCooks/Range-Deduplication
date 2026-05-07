@@ -109,6 +109,7 @@ class GlobalConfig(BaseModel):
 # Common knobs for all workloads
 class CommonWorkloadKnobs(BaseModel):
     k: int = Field(default=10, ge=1)
+    query_time_budget_s: Optional[float] = Field(default=None, gt=0, description="Optional time budget for query phase in seconds")
     query_ratio: float = Field(default=0.01, ge=0, le=1)
     query_vectors: Optional[str] = Field(default=None)
     metrics: List[str] = Field(default=["latency_p50", "latency_p95", "qps"])

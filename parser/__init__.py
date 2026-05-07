@@ -30,6 +30,7 @@ from parser.parser import (
     get_metrics,
     get_monitor_system,
     # Common workload helpers
+    get_query_time_budget_s,
     get_drop_collection_first,
     # Concurrent ingestion workload
     get_initial_ingest_ratio,
@@ -65,6 +66,7 @@ __all__ = [
     "get_containers",
     "system_metrics",
     # Common workload helpers
+    "get_query_time_budget_s",
     "get_drop_collection_first",
     # Concurrent ingestion workload
     "get_initial_ingest_ratio",
