@@ -249,7 +249,10 @@ def main(config_path: Optional[str] = None) -> Dict[str, Any]:
             "passes": [
                 {
                     "path": f"pass_{p['pass']}/results.json",
-                    **p
+                    "results": {
+                        k: v for k, v in p.items()
+                        if not k.startswith("_")
+                    }
                 }
                 for p in query_results["passes"]
             ]
