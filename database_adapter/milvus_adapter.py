@@ -336,6 +336,40 @@ class MilvusAdapter(DatabaseAdapter):
             return batch_results
         except Exception as e:
             raise QueryError(f"Batch query failed: {e}")
+    
+    def delete(self, ids: List[int]) -> int:
+        """Delete vectors by IDs."""
+        self._ensure_connected()
+        try:
+            self._client.delete(self._config.collection, ids=ids)
+            return len(ids)
+        except Exception:
+            return 0
+
+
+    def compact(self, timeout: float = 60.0) -> Dict[str, Any]:
+        """
+        Compact collection to physically remove tombstoned (deleted) vectors.
+        Uses ORM Collection since MilvusClient does not expose compact().
+        Blocks until compaction completes or timeout is reached.
+        """
+        self._ensure_connected()
+        from pymilvus import Collection
+
+        try:
+            t0 = time.perf_counter()
+            col = Collection(self._config.collection)
+            col.compact()
+            col.wait_for_compaction_completed(timeout=timeout)
+            duration_ms = (time.perf_counter() - t0) * 1000.0
+
+            print(f"[MilvusAdapter] Compaction completed in {duration_ms:.1f}ms")
+            return {"status": "completed", "duration_ms": duration_ms}
+
+        except Exception as e:
+            duration_ms = (time.perf_counter() - t0) * 1000.0
+            print(f"[MilvusAdapter] Compaction failed: {e}")
+            return {"status": "failed", "duration_ms": duration_ms, "error": str(e)}
 
     def health_check(self) -> HealthStatus:
         """Check Milvus connection health."""
@@ -363,15 +397,6 @@ class MilvusAdapter(DatabaseAdapter):
         if self._client.has_collection(self._config.collection):
             self._client.drop_collection(self._config.collection)
             print(f"[MilvusAdapter] Collection {self._config.collection} dropped")
-
-    def delete(self, ids: List[int]) -> int:
-        """Delete vectors by primary-key IDs."""
-        self._ensure_connected()
-        try:
-            self._client.delete(self._config.collection, ids=ids)
-            return len(ids)
-        except Exception:
-            return 0
 
     def get_stats(self) -> Dict[str, Any]:
         """Return basic collection statistics."""

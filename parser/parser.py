@@ -218,29 +218,80 @@ def get_mmd_kernel_bandwidth(config: Dict[str, Any]) -> float:
 # RWD WORKLOAD HELPERS
 # =============================================================================
 
+def get_workload_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    return config.get("workload", {})
+
+
+def get_initial_ingest_ratio(config: Dict[str, Any]) -> float:
+    return get_workload_config(config).get("initial_ingest_ratio", 0.5)
+
+
+def get_write_batch_size(config: Dict[str, Any]) -> int:
+    return get_workload_config(config).get("write_batch_size", 500)
+
+
+def get_query_vectors_path(config: Dict[str, Any]) -> str:
+    return get_workload_config(config).get("query_vectors_path", "")
+
+
+def get_query_ratio(config: Dict[str, Any]) -> float | None:
+    return get_workload_config(config).get("query_ratio", None)
+
+
 def get_read_ratio(config: Dict[str, Any]) -> float:
-    """Get read ratio for RWD workload."""
     return get_workload_config(config).get("read_ratio", 0.7)
 
 
 def get_write_ratio(config: Dict[str, Any]) -> float:
-    """Get write ratio for RWD workload."""
     return get_workload_config(config).get("write_ratio", 0.2)
 
 
 def get_delete_ratio(config: Dict[str, Any]) -> float:
-    """Get delete ratio for RWD workload."""
     return get_workload_config(config).get("delete_ratio", 0.1)
 
 
-def get_zombie_threshold(config: Dict[str, Any]) -> float:
-    """Get zombie threshold for re-indexing."""
-    return get_workload_config(config).get("zombie_threshold", 0.15)
+def get_frequency_seconds(config: Dict[str, Any]) -> float:
+    return get_workload_config(config).get("frequency_seconds", 5.0)
+
+
+def get_max_duration_seconds(config: Dict[str, Any]) -> float:
+    return get_workload_config(config).get("max_duration_seconds", 180.0)
 
 
 def get_maintenance_check_interval(config: Dict[str, Any]) -> float:
-    """Get interval for maintenance (drift/zombie) checks."""
     return get_workload_config(config).get("maintenance_check_interval", 10.0)
+
+
+def get_drift_threshold(config: Dict[str, Any]) -> float:
+    return get_workload_config(config).get("drift_threshold", 0.1)
+
+
+def get_zombie_threshold(config: Dict[str, Any]) -> float:
+    return get_workload_config(config).get("zombie_threshold", 0.15)
+
+
+def get_drift_metric_type(config: Dict[str, Any]) -> str:
+    return get_workload_config(config).get("drift_metric_type", "mmd")
+
+
+def get_mmd_kernel_bandwidth(config: Dict[str, Any]) -> float:
+    return get_workload_config(config).get("mmd_kernel_bandwidth", 1.0)
+
+
+def get_drift_buffer_size(config: Dict[str, Any]) -> int:
+    return get_workload_config(config).get("drift_buffer_size", 2000)
+
+
+def get_drift_min_buffer(config: Dict[str, Any]) -> int:
+    return get_workload_config(config).get("drift_min_buffer", 100)
+
+
+def get_ttl_seconds(config: Dict[str, Any]) -> float:
+    return get_workload_config(config).get("ttl_seconds", 60.0)
+
+
+def get_ttl_jitter(config: Dict[str, Any]) -> float:
+    return get_workload_config(config).get("ttl_jitter", 10.0)
 
 # =============================================================================
 # FILTERED ANN WORKLOAD HELPERS

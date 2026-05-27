@@ -127,7 +127,6 @@ class ConcurrentIngestionWorkloadKnobs(CommonWorkloadKnobs):
     # Existing Knobs
     initial_ingest_ratio: float = Field(default=0.5, ge=0, le=1)
     frequency_seconds: float = Field(default=5.0, gt=0)
-    query_batch_size: int = Field(default=100, ge=1)
     max_duration_seconds: float = Field(default=0.0, ge=0)
     
     # Drift Detection Knobs 
@@ -141,20 +140,28 @@ class RwdWorkloadKnobs(CommonWorkloadKnobs):
     type: Literal["rwd_workload"] = "rwd_workload"
 
     initial_ingest_ratio: float = Field(default=0.5, ge=0, le=1)
+    write_batch_size : int = Field(default=500,ge=0)
+    query_vectors_path : str = Field(default="")
+    query_ratio : float = Field(default=None,ge=0,le=1)
 
     read_ratio: float = Field(default=0.7, ge=0)
     write_ratio: float = Field(default=0.2, ge=0)
     delete_ratio: float = Field(default=0.1, ge=0)
-
+    
     frequency_seconds: float = Field(default=5.0, gt=0)
-    query_batch_size: int = Field(default=100, ge=1)
     max_duration_seconds: float = Field(default=0.0, ge=0)
 
     maintenance_check_interval: float = Field(default=10.0, gt=0)
-    drift_threshold: float = Field(default=0.1, ge=0)
+    drift_threshold: float = Field(default=0.1, ge=0,le=1)
     zombie_threshold: float = Field(default=0.15, ge=0, le=1)
     drift_metric_type: Literal["mmd", "centroid"] = Field(default="mmd")
     mmd_kernel_bandwidth: float = Field(default=1.0, gt=0)
+    drift_buffer_size : int = Field(default=2000,ge=0)
+    drift_min_buffer : int = Field(default=100,ge=0)
+    frequency_seconds : float = Field(default=5.0,ge=0)
+    max_duration_seconds : float = Field(default=180.0,ge=0.0)
+    ttl_seconds :float = Field(default=60.0,ge=0.0)
+    ttl_jitter  :float = Field(default=10.0,ge=0.0)
 
 
 class BurstRwdWorkloadKnobs(CommonWorkloadKnobs):
