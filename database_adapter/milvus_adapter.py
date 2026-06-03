@@ -41,6 +41,8 @@ INDEX_TYPE_MAP = {
     "ivf_pq": "IVF_PQ",
     "ivf_sq8": "IVF_SQ8",
     "flat": "FLAT",
+    "scann": "SCANN",
+    "diskann": "DISKANN",
     "autoindex": "AUTOINDEX",
 }
 
@@ -98,6 +100,14 @@ class MilvusAdapter(DatabaseAdapter):
                 sp["params"]["ef"] = params.get("ef", params.get("ef_search", 100))
             elif idx_type in ("IVF_FLAT", "IVF_PQ", "IVF_SQ8"):
                 sp["params"]["nprobe"] = params.get("nprobe", 10)
+            elif idx_type == "SCANN":
+                sp["params"]["nprobe"] = params.get("nprobe", 64)
+                # reorder_k must be >= k; caller should pass it explicitly for tight recall budgets
+                if params.get("reorder_k") is not None:
+                    sp["params"]["reorder_k"] = params["reorder_k"]
+            elif idx_type == "DISKANN":
+                # search_list must be >= k — Milvus errors if not satisfied
+                sp["params"]["search_list"] = params.get("search_list", 100)
 
         if params.get("radius") is not None:
             sp["params"]["radius"] = params["radius"]
@@ -201,6 +211,17 @@ class MilvusAdapter(DatabaseAdapter):
                 idx_params["nbits"] = raw.get("nbits", 8)
         elif milvus_index_type == "FLAT":
             idx_params = {}
+        elif milvus_index_type == "SCANN":
+            idx_params = {
+                "nlist": raw.get("nlist", 1024),
+                "with_raw_data": raw.get("with_raw_data", True),
+            }
+        elif milvus_index_type == "DISKANN":
+            # DiskANN has no required build params; all are optional tuning knobs.
+            idx_params = {}
+            for key in ("max_degree", "search_list_size", "pq_code_budget_gb", "build_dram_budget_gb"):
+                if key in raw:
+                    idx_params[key] = raw[key]
         else:
             idx_params = raw
 
@@ -344,6 +365,7 @@ class MilvusAdapter(DatabaseAdapter):
             self._client.delete(self._config.collection, ids=ids)
             return len(ids)
         except Exception:
+            print(f"[MilvusAdapter] Delete failed")
             return 0
 
 
@@ -401,13 +423,15 @@ class MilvusAdapter(DatabaseAdapter):
     def get_stats(self) -> Dict[str, Any]:
         """Return basic collection statistics."""
         self._ensure_connected()
+        self._client.flush(self._config.collection)
         try:
             stats = self._client.get_collection_stats(self._config.collection)
             return {
                 "collection": self._config.collection,
                 "num_entities": int(stats.get("row_count", 0)),
             }
-        except Exception:
+        except Exception as e:
+            print(f"[MilvusAdapter] Failed to get collection stats: {e}")
             return {}
 
     # ------------------------------------------------------------------
@@ -465,17 +489,16 @@ class MilvusAdapter(DatabaseAdapter):
         return hits
 
     # ------------------------------------------------------------------
-    # Multi-modal workload
+    # Multi-modal workload 
     # ------------------------------------------------------------------
-
+    
     def create_multi_modal_collection(
         self,
-        vector_dim: int,
+        vector_dim: Optional[int] = None,
         mode: str = "unified",
         partitions: Optional[List[str]] = None,
         drop_existing: bool = True,
     ) -> None:
-        """Unified mode adds a 'modality' INT8 field; partitioned mode creates partitions."""
         self._ensure_connected()
         collection_name = self._config.collection
 
@@ -484,20 +507,30 @@ class MilvusAdapter(DatabaseAdapter):
                 self._client.drop_collection(collection_name)
                 print(f"[Milvus] Dropped existing collection: {collection_name}")
             else:
+                print(f"[Milvus] Using existing collection: {collection_name}")
                 return
+
+        self._mm_mode = mode
+        self._mm_collections: Dict[str, str] = {}  
 
         schema = self._client.create_schema(
             auto_id=False,
             enable_dynamic_field=False,
-            description=f"Multi-Modal ({mode})",
+            description=f"Multi-Modal collection ({mode})",
         )
         schema.add_field("id", DataType.INT64, is_primary=True)
+
+        if vector_dim is None:
+            raise ValueError("vector_dim must be provided")
+        self._vector_dim = vector_dim
         schema.add_field("vector", DataType.FLOAT_VECTOR, dim=vector_dim)
+
         if mode == "unified":
-            schema.add_field("modality", DataType.INT8)
+            schema.add_field("modality_id",   DataType.INT32)
+            schema.add_field("partition_tag", DataType.VARCHAR, max_length=32)
 
         self._client.create_collection(collection_name, schema=schema)
-        print(f"[Milvus] Created collection: {collection_name} (Mode: {mode})")
+        print(f"[Milvus] Created collection: {collection_name} (mode={mode}, dim={vector_dim})")
 
         if mode == "partitioned" and partitions:
             for part_name in partitions:
@@ -505,36 +538,35 @@ class MilvusAdapter(DatabaseAdapter):
                 print(f"[Milvus] Created partition: {part_name}")
 
     def insert_multi_modal(
-        self, batch: List[Dict[str, Any]], mode: str = "unified"
+        self,
+        batch: List[Dict[str, Any]],
+        mode: Optional[str] = None, 
     ) -> None:
         self._ensure_connected()
-        if mode == "unified":
-            data = [
-                {"id": item["id"], "vector": item["vector"], "modality": item["modality_id"]}
-                for item in batch
-            ]
-            self._client.insert(self._config.collection, data)
-        elif mode == "partitioned":
-            batches_by_part: Dict[str, List[Dict]] = defaultdict(list)
-            for item in batch:
-                tag = item.get("partition_tag", "_default")
-                batches_by_part[tag].append({"id": item["id"], "vector": item["vector"]})
-            for tag, data in batches_by_part.items():
-                self._client.insert(self._config.collection, data, partition_name=tag)
+        data = [
+            {
+                "id":            item["id"],
+                "vector":        item["vector"],
+                "modality_id":   int(item.get("modality_id", 0)),
+                "partition_tag": str(item.get("partition_tag", "")),
+            }
+            for item in batch
+        ]
+        self._client.insert(self._config.collection, data)
 
     def search_multi_modal(
         self,
         query_vector: List[float],
         k: int,
         modality_filter: Optional[int] = None,
-        partition_filter: Optional[str] = None,
+        partition_filter: Optional[str] = None, 
         params: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         self._ensure_connected()
-        params = params or {}
+        params        = params or {}
         search_params = self._build_search_params(params)
 
-        expr = f"modality == {modality_filter}" if modality_filter is not None else None
+        expr            = f"modality_id == {modality_filter}" if modality_filter is not None else None
         partition_names = [partition_filter] if partition_filter is not None else None
 
         results = self._client.search(
@@ -547,11 +579,88 @@ class MilvusAdapter(DatabaseAdapter):
             partition_names=partition_names,
             output_fields=["id"],
         )
+
         hits = []
         if results:
             for hit in results[0]:
                 hits.append({"id": hit["id"], "distance": hit["distance"]})
         return hits
+
+    def batch_search_multi_modal(
+        self,
+        query_vectors: List[List[float]],
+        k: int,
+        modality_filters: Optional[List[Optional[int]]] = None,
+        partition_filters: Optional[List[Optional[str]]] = None,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> List[List[Dict[str, Any]]]:
+        self._ensure_connected()
+        params        = params or {}
+        search_params = self._build_search_params(params)
+        size          = len(query_vectors)
+        results: List[Optional[List[Dict[str, Any]]]] = [None] * size
+
+        groups_homo: Dict[Any, List[int]] = defaultdict(list)
+
+        for i in range(size):
+            m_filt = modality_filters[i] if modality_filters is not None else None
+            p_filt = partition_filters[i] if partition_filters is not None else None
+
+            if isinstance(p_filt, list):
+                key = ("__partitioned_enabled__", tuple(sorted(p_filt)))
+            elif p_filt is not None:
+                key = (None, (p_filt,))
+            elif m_filt is not None:
+                key = (f"modality_id == {m_filt}", None)
+            else:
+                key = (None, None)
+
+            groups_homo[key].append(i)
+
+        for key, indices in groups_homo.items():
+            expr_or_tag, partitions_tuple = key
+            batch_vecs = [query_vectors[i] for i in indices]
+
+            if expr_or_tag == "__partitioned_enabled__":
+                all_part_names = list(partitions_tuple)
+                per_partition = []
+                for part in all_part_names:
+                    raw = self._client.search(
+                        collection_name=self._config.collection,
+                        data=batch_vecs,
+                        anns_field="vector",
+                        search_params=search_params,
+                        limit=k,
+                        partition_names=[part],
+                        output_fields=["id"],
+                    ) or []
+                    per_partition.append([
+                        [{"id": h["id"], "distance": h["distance"]} for h in hits]
+                        for hits in raw
+                    ])
+                for j, i in enumerate(indices):
+                    merged = []
+                    for part_hits in per_partition:
+                        merged.extend(part_hits[j] if j < len(part_hits) else [])
+                    merged.sort(key=lambda h: h["distance"])
+                    results[i] = merged
+
+            else:
+                raw = self._client.search(
+                    collection_name=self._config.collection,
+                    data=batch_vecs,
+                    anns_field="vector",
+                    search_params=search_params,
+                    limit=k,
+                    filter=expr_or_tag,
+                    partition_names=list(partitions_tuple) if partitions_tuple else None,
+                    output_fields=["id"],
+                ) or []
+                for j, i in enumerate(indices):
+                    hits = raw[j] if j < len(raw) else []
+                    results[i] = [{"id": h["id"], "distance": h["distance"]} for h in hits]
+
+        return [r or [] for r in results]
 
     def get_partition_stats(self, partition_name: str) -> Dict[str, Any]:
         """Return entity count for a named partition via count(*) query."""
