@@ -2,6 +2,7 @@
 Parser Module - Schema + Parser
 """
 
+# pyrefly: ignore [missing-import]
 from parser.schema import (
     GlobalConfig,
     WorkloadConfig,
@@ -12,6 +13,7 @@ from parser.schema import (
     MetricType,
     normalize_to_underscore,
 )
+# pyrefly: ignore [missing-import]
 from parser.parser import (
     load_config,
     get_global_config,
@@ -20,7 +22,9 @@ from parser.parser import (
     get_workload_config,
     get_dataset_name,
     get_seed,
-    get_concurrency,
+    use_mmap,
+    get_read_concurrency,
+    get_write_concurrency,
     get_ingest_batch_size,
     get_query_batch_size,
     get_containers,
@@ -75,7 +79,9 @@ __all__ = [
     "get_workload_config",
     "get_dataset_name",
     "get_seed",
-    "get_concurrency",
+    "use_mmap",
+    "get_read_concurrency",
+    "get_write_concurrency",
     "get_ingest_batch_size",
     "get_query_batch_size",
     "get_monitor_system",

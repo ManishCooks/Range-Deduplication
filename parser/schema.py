@@ -100,7 +100,10 @@ class GlobalConfig(BaseModel):
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     dataset: str = Field(default="")
     seed: int = Field(default=42)
-    concurrency: int = Field(default=4, ge=1)
+    use_mmap : bool = Field(default=False)
+    read_concurrency: Optional[int] = Field(default=None, ge=1)
+    write_concurrency: Optional[int] = Field(default=None, ge=1)
+    
     ingest_batch_size: int = Field(default=1500, ge=1)
     query_batch_size: int = Field(default=500, ge=1)
     vector_dimension: int = Field(default=128, ge=1)    

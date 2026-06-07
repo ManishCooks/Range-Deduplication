@@ -54,10 +54,21 @@ def get_seed(config: Dict[str, Any]) -> int:
     """Get random seed from global."""
     return get_global_config(config).get("seed", 42)
 
+def use_mmap(config: Dict[str, Any]) -> bool:
+    """Get whether to use mmap from global."""
+    return get_global_config(config).get("use_mmap", False)
 
-def get_concurrency(config: Dict[str, Any]) -> int:
-    """Get concurrency from global."""
-    return get_global_config(config).get("concurrency", 4)
+
+def get_read_concurrency(config: Dict[str, Any]) -> int:
+    """Get read concurrency from global."""
+    global_cfg = get_global_config(config)
+    return global_cfg.get("read_concurrency", 4)
+
+
+def get_write_concurrency(config: Dict[str, Any]) -> int:
+    """Get write concurrency from global."""
+    global_cfg = get_global_config(config)
+    return global_cfg.get("write_concurrency", 4)
 
 
 def get_ingest_batch_size(config: Dict[str, Any]) -> int: 

@@ -7,7 +7,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from database_adapter.base import DatabaseAdapter, QueryResult, InsertResult, HealthStatus
+from database_adapter.base import DatabaseAdapter, QueryResult, InsertResult, DeleteResult, HealthStatus
 from database_adapter.exceptions import ConnectionError, InsertError, QueryError
 
 try:
@@ -183,13 +183,13 @@ class QdrantAdapter(DatabaseAdapter):
     def insert(self, batch) -> InsertResult:
         """Insert vectors; batch is (ids_list, vectors_list)."""
         self._ensure_connected()
-        start = time.perf_counter()
         try:
             ids, vectors = batch
             points = [
                 rest.PointStruct(id=int(id_), vector=vec)
                 for id_, vec in zip(ids, vectors)
             ]
+            start = time.perf_counter()
             self._client.upsert(
                 collection_name=self._config.collection,
                 points=points
@@ -201,10 +201,9 @@ class QdrantAdapter(DatabaseAdapter):
                 execution_time_ms=execution_ms,
             )
         except Exception as e:
-            elapsed = (time.perf_counter() - start) * 1000
             n = len(batch[1]) if (isinstance(batch, (list, tuple)) and len(batch) > 1) else 0
             print(f"[QdrantAdapter] Insert error: {e}")
-            return InsertResult(inserted_count=0, failed_count=n, execution_time_ms=elapsed)
+            return InsertResult(inserted_count=0, failed_count=n, execution_time_ms=0.0)
 
     def flush(self) -> None:
         """Flush the collection to persist buffered data."""
@@ -212,8 +211,6 @@ class QdrantAdapter(DatabaseAdapter):
 
     def query(self, params: Dict[str, Any]) -> QueryResult:
         self._ensure_connected()
-
-        start = time.perf_counter()
 
         try:
             query_vector = params["vector"]
@@ -225,6 +222,7 @@ class QdrantAdapter(DatabaseAdapter):
                     hnsw_ef=params["ef"]
                 )
 
+            start = time.perf_counter()
             results = self._client.query_points(
                 collection_name=self._config.collection,
                 query=query_vector,
@@ -261,7 +259,6 @@ class QdrantAdapter(DatabaseAdapter):
         """Batch ANN search — one QueryResult per query vector."""
         self._ensure_connected()
         params = params or {}
-        start = time.perf_counter()
         try:
             search_params = None
 
@@ -280,6 +277,7 @@ class QdrantAdapter(DatabaseAdapter):
                 for vec in vectors
             ]
         
+            start = time.perf_counter()
             results = self._client.query_batch_points(
                 collection_name=self._config.collection,
                 requests=requests,
@@ -306,29 +304,20 @@ class QdrantAdapter(DatabaseAdapter):
         except Exception as e:
             raise QueryError(f"Batch query failed: {e}")
 
-    def delete(self, ids: List[int]) -> int:
+    def delete(self, ids: List[int]) -> DeleteResult:
         """Delete vectors by IDs."""
         self._ensure_connected()
         try:
+            start = time.perf_counter()
             self._client.delete(
                 collection_name=self._config.collection,
                 points_selector=rest.PointIdsList(points=ids)
             )
-            return len(ids)
+            elapsed = (time.perf_counter() - start) * 1000
+            return DeleteResult(deleted_count=len(ids), execution_time_ms=elapsed)
         except Exception:
             print(f"[QdrantAdapter] Delete failed")
-            return 0
-
-    def compact(self, timeout: float = 60.0) -> Dict[str, Any]:
-        """
-        Qdrant handles optimization in the background. 
-        We just wait a moment to simulate compaction.
-        """
-        self._ensure_connected()
-        t0 = time.perf_counter()
-        time.sleep(1.0) # Simulate 
-        duration_ms = (time.perf_counter() - t0) * 1000.0
-        return {"status": "completed", "duration_ms": duration_ms}
+            return DeleteResult(deleted_count=0, execution_time_ms=0.0)
 
     def health_check(self) -> HealthStatus:
         """Check Qdrant connection health."""

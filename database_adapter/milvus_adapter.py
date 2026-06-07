@@ -7,7 +7,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from database_adapter.base import DatabaseAdapter, QueryResult, InsertResult, HealthStatus
+from database_adapter.base import DatabaseAdapter, QueryResult, InsertResult, DeleteResult, HealthStatus
 from database_adapter.exceptions import ConnectionError, InsertError, QueryError
 
 try:
@@ -261,10 +261,10 @@ class MilvusAdapter(DatabaseAdapter):
     def insert(self, batch) -> InsertResult:
         """Insert vectors; batch is (ids_list, vectors_list)."""
         self._ensure_connected()
-        start = time.perf_counter()
         try:
             ids, vectors = batch
             data = [{"id": id_, "vector": vec} for id_, vec in zip(ids, vectors)]
+            start = time.perf_counter()
             self._client.insert(self._config.collection, data)
             execution_ms = (time.perf_counter() - start) * 1000
             return InsertResult(
@@ -273,9 +273,8 @@ class MilvusAdapter(DatabaseAdapter):
                 execution_time_ms=execution_ms,
             )
         except Exception:
-            elapsed = (time.perf_counter() - start) * 1000
             n = len(batch[1]) if (isinstance(batch, (list, tuple)) and len(batch) > 1) else 0
-            return InsertResult(inserted_count=0, failed_count=n, execution_time_ms=elapsed)
+            return InsertResult(inserted_count=0, failed_count=n, execution_time_ms=0.0)
 
     def flush(self) -> None:
         """Flush the collection to persist buffered data."""
@@ -287,12 +286,12 @@ class MilvusAdapter(DatabaseAdapter):
     def query(self, params: Dict[str, Any]) -> QueryResult:
         """Single-vector ANN search."""
         self._ensure_connected()
-        start = time.perf_counter()
         try:
             query_vector = params.get("vector", [])
             k = params.get("k", 10)
             search_params = self._build_search_params(params)
 
+            start = time.perf_counter()
             results = self._client.search(
                 collection_name=self._config.collection,
                 data=[query_vector],
@@ -301,7 +300,6 @@ class MilvusAdapter(DatabaseAdapter):
                 limit=k,
                 output_fields=["id"],
             )
-
             elapsed = (time.perf_counter() - start) * 1000
             data = []
             for hits in results:
@@ -326,10 +324,10 @@ class MilvusAdapter(DatabaseAdapter):
         """Batch ANN search — one QueryResult per query vector."""
         self._ensure_connected()
         params = params or {}
-        start = time.perf_counter()
         try:
             search_params = self._build_search_params(params)
 
+            start = time.perf_counter()
             results = self._client.search(
                 collection_name=self._config.collection,
                 data=vectors,
@@ -338,7 +336,6 @@ class MilvusAdapter(DatabaseAdapter):
                 limit=k,
                 output_fields=["id"],
             )
-
             elapsed = (time.perf_counter() - start) * 1000
             total = self._get_num_entities()
             batch_results = []
@@ -358,40 +355,17 @@ class MilvusAdapter(DatabaseAdapter):
         except Exception as e:
             raise QueryError(f"Batch query failed: {e}")
     
-    def delete(self, ids: List[int]) -> int:
+    def delete(self, ids: List[int]) -> DeleteResult:
         """Delete vectors by IDs."""
         self._ensure_connected()
         try:
+            start = time.perf_counter()
             self._client.delete(self._config.collection, ids=ids)
-            return len(ids)
+            elapsed = (time.perf_counter() - start) * 1000
+            return DeleteResult(deleted_count=len(ids), execution_time_ms=elapsed)
         except Exception:
             print(f"[MilvusAdapter] Delete failed")
-            return 0
-
-
-    def compact(self, timeout: float = 60.0) -> Dict[str, Any]:
-        """
-        Compact collection to physically remove tombstoned (deleted) vectors.
-        Uses ORM Collection since MilvusClient does not expose compact().
-        Blocks until compaction completes or timeout is reached.
-        """
-        self._ensure_connected()
-        from pymilvus import Collection
-
-        try:
-            t0 = time.perf_counter()
-            col = Collection(self._config.collection)
-            col.compact()
-            col.wait_for_compaction_completed(timeout=timeout)
-            duration_ms = (time.perf_counter() - t0) * 1000.0
-
-            print(f"[MilvusAdapter] Compaction completed in {duration_ms:.1f}ms")
-            return {"status": "completed", "duration_ms": duration_ms}
-
-        except Exception as e:
-            duration_ms = (time.perf_counter() - t0) * 1000.0
-            print(f"[MilvusAdapter] Compaction failed: {e}")
-            return {"status": "failed", "duration_ms": duration_ms, "error": str(e)}
+            return DeleteResult(deleted_count=0, execution_time_ms=0.0)
 
     def health_check(self) -> HealthStatus:
         """Check Milvus connection health."""
