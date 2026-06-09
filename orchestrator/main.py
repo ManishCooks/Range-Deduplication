@@ -60,7 +60,7 @@ class Orchestrator:
 
         print(f"[Orchestrator] Dataset:           {self.global_config_model.dataset}")
         print(f"[Orchestrator] Read Concurrency:  {self.global_config_model.read_concurrency}")
-        print(f"[Orchestrator] Write Concurrency: {self.global_config_model.write_concurrency}")
+        print(f"[Orchestrator] Ingest Concurrency: {self.global_config_model.ingest_concurrency}")
         print(f"[Orchestrator] Ingest Batch size: {self.global_config_model.ingest_batch_size}")
 
     # =========================================================================

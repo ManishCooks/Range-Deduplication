@@ -24,7 +24,7 @@ from parser.parser import (
     get_seed,
     use_mmap,
     get_read_concurrency,
-    get_write_concurrency,
+    get_ingest_concurrency,
     get_ingest_batch_size,
     get_query_batch_size,
     get_containers,
@@ -41,7 +41,9 @@ from parser.parser import (
     get_write_batch_size,
     get_query_vectors_path,
 
-    get_read_ratio,
+    get_delete_batch_size,
+    get_write_concurrency,
+    get_delete_concurrency,
     get_write_ratio,
     get_delete_ratio,
 
@@ -81,7 +83,7 @@ __all__ = [
     "get_seed",
     "use_mmap",
     "get_read_concurrency",
-    "get_write_concurrency",
+    "get_ingest_concurrency",
     "get_ingest_batch_size",
     "get_query_batch_size",
     "get_monitor_system",
@@ -98,7 +100,9 @@ __all__ = [
     "get_write_batch_size",
     "get_query_vectors_path",
 
-    "get_read_ratio",
+    "get_delete_batch_size",
+    "get_write_concurrency",
+    "get_delete_concurrency",
     "get_write_ratio",
     "get_delete_ratio",
 

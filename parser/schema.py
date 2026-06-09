@@ -102,7 +102,7 @@ class GlobalConfig(BaseModel):
     seed: int = Field(default=42)
     use_mmap : bool = Field(default=False)
     read_concurrency: Optional[int] = Field(default=None, ge=1)
-    write_concurrency: Optional[int] = Field(default=None, ge=1)
+    ingest_concurrency: Optional[int] = Field(default=None, ge=1)
     
     ingest_batch_size: int = Field(default=1500, ge=1)
     query_batch_size: int = Field(default=500, ge=1)
@@ -147,7 +147,9 @@ class RwdWorkloadKnobs(CommonWorkloadKnobs):
     query_vectors_path : str = Field(default="")
     query_ratio : float = Field(default=None,ge=0,le=1)
 
-    read_ratio: float = Field(default=0.7, ge=0)
+    delete_batch_size : int = Field(default=500,ge=0)
+    write_concurrency: Optional[int] = Field(default=None, ge=1)
+    delete_concurrency: Optional[int] = Field(default=None, ge=1)
     write_ratio: float = Field(default=0.2, ge=0)
     delete_ratio: float = Field(default=0.1, ge=0)
     
@@ -158,7 +160,7 @@ class RwdWorkloadKnobs(CommonWorkloadKnobs):
     drift_threshold: float = Field(default=0.1, ge=0,le=1)
     zombie_threshold: float = Field(default=0.15, ge=0, le=1)
     drift_metric_type: Literal["mmd", "centroid"] = Field(default="mmd")
-    mmd_kernel_bandwidth: float = Field(default=1.0, gt=0)
+    mmd_kernel_bandwidth: Optional[float] = Field(default=None, gt=0)
     drift_buffer_size : int = Field(default=2000,ge=0)
     drift_min_buffer : int = Field(default=100,ge=0)
     frequency_seconds : float = Field(default=5.0,ge=0)

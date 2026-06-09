@@ -65,11 +65,10 @@ def get_read_concurrency(config: Dict[str, Any]) -> int:
     return global_cfg.get("read_concurrency", 4)
 
 
-def get_write_concurrency(config: Dict[str, Any]) -> int:
+def get_ingest_concurrency(config: Dict[str, Any]) -> int:
     """Get write concurrency from global."""
     global_cfg = get_global_config(config)
-    return global_cfg.get("write_concurrency", 4)
-
+    return global_cfg.get("ingest_concurrency", 4)
 
 def get_ingest_batch_size(config: Dict[str, Any]) -> int: 
     """Get ingest batch size from global."""
@@ -240,10 +239,17 @@ def get_initial_ingest_ratio(config: Dict[str, Any]) -> float:
 def get_write_batch_size(config: Dict[str, Any]) -> int:
     return get_workload_config(config).get("write_batch_size", 500)
 
+def get_delete_batch_size(config: Dict[str, Any]) -> int:
+    return get_workload_config(config).get("delete_batch_size", 500)
+
+def get_write_concurrency(config: Dict[str, Any]) -> int:
+    return get_workload_config(config).get("write_concurrency", 4)
+
+def get_delete_concurrency(config: Dict[str, Any]) -> int:
+    return get_workload_config(config).get("delete_concurrency", 4)
 
 def get_query_vectors_path(config: Dict[str, Any]) -> str:
     return get_workload_config(config).get("query_vectors_path", "")
-
 
 def get_query_ratio(config: Dict[str, Any]) -> float | None:
     return get_workload_config(config).get("query_ratio", None)
