@@ -76,7 +76,9 @@ class Orchestrator:
         extra_kwargs = {}
         if db_config.adapter in ("pinecone", "pinecone_serverless") and hasattr(db_config, "pinecone_config") and db_config.pinecone_config:
             extra_kwargs["pinecone_config"] = db_config.pinecone_config.model_dump()
-
+         
+        if db_config.adapter == "pipeann":
+            extra_kwargs["pipeann_config"] = self.config.get("global", {}).get("pipeann_config", {})
         self.adapter = get_adapter(
             adapter_type=db_config.adapter,
             host=db_config.host,

@@ -36,6 +36,7 @@ class WorkloadType(str, Enum):
     LID_WORKLOAD = "lid_workload"
     DEDUPLICATION_WORKLOAD = "deduplication_workload"
     OOD_WORKLOAD = "ood_workload"
+    TEMPORAL_FRESHNESS_WORKLOAD = "temporal_freshness_workload"
     
     @classmethod
     def _missing_(cls, value):
@@ -108,6 +109,7 @@ class GlobalConfig(BaseModel):
     query_batch_size: int = Field(default=500, ge=1)
     vector_dimension: int = Field(default=128, ge=1)    
     drop_collection_first: bool = Field(default=True)
+    pipeann_config: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 # Common knobs for all workloads
 class CommonWorkloadKnobs(BaseModel):
@@ -503,15 +505,27 @@ class LidWorkloadKnobs(CommonWorkloadKnobs):
         description="k for LID recomputation during reindex")
 
 class OodWorkloadKnobs(CommonWorkloadKnobs):
-    """
-    Knobs for the OOD (Out-of-Distribution) Evaluation Workload.
-    Reads pre-processed HDF5 embeddings to execute mixed ID/OOD queries.
-    """
     type: Literal["ood_workload"] = "ood_workload"
-    
     ingestion_ratio: float = Field(default=1.0, ge=0.0, le=1.0)
     id_query_ratio: float = Field(default=0.5, ge=0.0, le=1.0)
+    total_queries: int = Field(default=10000, ge=1)
     ood_query_ratio: float = Field(default=0.5, ge=0.0, le=1.0)
+
+class TemporalFreshnessWorkloadKnobs(CommonWorkloadKnobs):
+    type: Literal["temporal_freshness_workload"] = "temporal_freshness_workload"
+    k_prime: int = Field(default=50, ge=1)
+    freshness_weight: float = Field(default=0.3, ge=0.0, le=1.0)
+    decay_lambda: float = Field(default=1/86400, gt=0.0)
+    similarity_threshold: float = Field(default=0.0)
+    n_queries: int = Field(default=1000, ge=1)
+    time_window_days: int = Field(default=365, ge=1)
+    distribution_mode: Literal["uniform", "recent_heavy", "old_heavy"] = Field(default="uniform")
+    beta_a: float = Field(default=2.0, gt=0.0)
+    beta_b: float = Field(default=5.0, gt=0.0)
+    search_params: Dict[str, Any] = Field(default_factory=dict)
+    rerank_concurrency: int = Field(default=1, ge=1)
+    time_source: Literal["synthetic", "metadata"] = Field(default="synthetic")
+    time_column: str = Field(default="timestamp")
     total_queries: int = Field(default=10000, ge=1)
 
 class DeduplicationWorkloadKnobs(CommonWorkloadKnobs):
@@ -544,6 +558,7 @@ WorkloadConfig = Union[
     LidWorkloadKnobs,
     DeduplicationWorkloadKnobs,
     OodWorkloadKnobs,
+    TemporalFreshnessWorkloadKnobs,
 ]
 
 
