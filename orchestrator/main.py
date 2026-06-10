@@ -144,6 +144,12 @@ class Orchestrator:
         if monitor_enabled:
             from orchestrator.operations.system_monitor import SystemMonitor
             monitor = SystemMonitor(container_names=container_names)
+            
+            import os
+            adapter_type = self.config.get("global", {}).get("database", {}).get("adapter", "")
+            if adapter_type == "pipeann":
+                monitor.set_pipeann_pid(os.getpid())
+
             monitor.start()
             print("[Orchestrator] System monitor started.")
 
@@ -168,7 +174,11 @@ class Orchestrator:
                     if key in sys_stats:
                         filtered_sys[key] = sys_stats[key]
 
-           
+            # Always include PipeANN metrics if they exist
+            for key, val in sys_stats.items():
+                if key.startswith("pipeann_"):
+                    filtered_sys[key] = val
+                    
             results["system_metrics"] = filtered_sys
 
         print("[Orchestrator] Workload completed")
