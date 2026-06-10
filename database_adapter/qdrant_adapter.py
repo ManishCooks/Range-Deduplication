@@ -85,6 +85,16 @@ class QdrantAdapter(DatabaseAdapter):
                 api_key=api_key,
                 timeout=600.0,
             )
+            import time
+            for attempt in range(15):
+                try:
+                    self._client.get_collections()
+                    break
+                except Exception as e:
+                    print(f"[QdrantAdapter] Waiting for server... ({e})")
+                    time.sleep(2)
+            else:
+                self._client.get_collections()
             self._connected = True
             print(f"[QdrantAdapter] Connected to {host}:{port} (gRPC={prefer_grpc})")
         except Exception as e:
@@ -185,6 +195,11 @@ class QdrantAdapter(DatabaseAdapter):
         self._ensure_connected()
         try:
             ids, vectors = batch
+            if hasattr(vectors, "tolist"):
+                vectors = vectors.tolist()
+            else:
+                vectors = [v.tolist() if hasattr(v, "tolist") else v for v in vectors]
+                
             points = [
                 rest.PointStruct(id=int(id_), vector=vec)
                 for id_, vec in zip(ids, vectors)
@@ -214,6 +229,8 @@ class QdrantAdapter(DatabaseAdapter):
 
         try:
             query_vector = params["vector"]
+            if hasattr(query_vector, "tolist"):
+                query_vector = query_vector.tolist()
             k = params.get("k", 10)
 
             search_params = None
@@ -267,6 +284,11 @@ class QdrantAdapter(DatabaseAdapter):
                     hnsw_ef=params["ef"]
                 )
 
+            if hasattr(vectors, "tolist"):
+                vectors = vectors.tolist()
+            else:
+                vectors = [v.tolist() if hasattr(v, "tolist") else v for v in vectors]
+
             requests = [
                 rest.QueryRequest(        
                     query=vec,       
@@ -309,6 +331,11 @@ class QdrantAdapter(DatabaseAdapter):
         self._ensure_connected()
         try:
             start = time.perf_counter()
+            if hasattr(ids, "tolist"):
+                ids = ids.tolist()
+            else:
+                ids = [int(i) for i in ids]
+                
             self._client.delete(
                 collection_name=self._config.collection,
                 points_selector=rest.PointIdsList(points=ids)
@@ -390,8 +417,13 @@ class QdrantAdapter(DatabaseAdapter):
     def insert_filtered(
         self, ids: List[int], vectors: List[List[float]], labels: List[int]
     ) -> None:
+        if hasattr(vectors, "tolist"):
+            vectors = vectors.tolist()
+        else:
+            vectors = [v.tolist() if hasattr(v, "tolist") else v for v in vectors]
+            
         points = [
-            rest.PointStruct(id=id_, vector=vec, payload={"label": lbl})
+            rest.PointStruct(id=int(id_), vector=vec, payload={"label": lbl})
             for id_, vec, lbl in zip(ids, vectors, labels)
         ]
         self._client.upsert(self._config.collection, points=points)
@@ -418,6 +450,9 @@ class QdrantAdapter(DatabaseAdapter):
         search_params = None
         if params.get("ef") is not None:
             search_params = rest.SearchParams(hnsw_ef=params["ef"])
+
+        if hasattr(query_vector, "tolist"):
+            query_vector = query_vector.tolist()
 
         results = self._client.search(
             collection_name=self._config.collection,
@@ -490,8 +525,8 @@ class QdrantAdapter(DatabaseAdapter):
         self._ensure_connected()
         points = [
             rest.PointStruct(
-                id=item["id"],
-                vector=item["vector"],
+                id=int(item["id"]),
+                vector=item["vector"].tolist() if hasattr(item["vector"], "tolist") else item["vector"],
                 payload={
                     "modality_id": int(item.get("modality_id", 0)),
                     "partition_tag": str(item.get("partition_tag", "")),
@@ -509,8 +544,8 @@ class QdrantAdapter(DatabaseAdapter):
         self._ensure_connected()
         points = [
             rest.PointStruct(
-                id=item["id"],
-                vector={partition_name: item["vector"]},
+                id=int(item["id"]),
+                vector={partition_name: item["vector"].tolist() if hasattr(item["vector"], "tolist") else item["vector"]},
             )
             for item in batch
         ]
@@ -525,6 +560,8 @@ class QdrantAdapter(DatabaseAdapter):
         params: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         self._ensure_connected()
+        if hasattr(query_vector, "tolist"):
+            query_vector = query_vector.tolist()
         params = params or {}
         search_params = None
         if params.get("ef") is not None:
@@ -588,7 +625,7 @@ class QdrantAdapter(DatabaseAdapter):
                 # For Partitioned+Enabled: one request per partition
                 for part in p_filt:
                     req = rest.SearchRequest(
-                        vector=rest.NamedVector(name=part, vector=query_vectors[i]),
+                        vector=rest.NamedVector(name=part, vector=query_vectors[i].tolist() if hasattr(query_vectors[i], "tolist") else query_vectors[i]),
                         limit=k,
                         params=search_params,
                         with_payload=False,
@@ -613,8 +650,9 @@ class QdrantAdapter(DatabaseAdapter):
                     if must_conds:
                         query_filter = rest.Filter(must=must_conds)
 
+                qv = query_vectors[i].tolist() if hasattr(query_vectors[i], "tolist") else query_vectors[i]
                 req = rest.SearchRequest(
-                    vector=rest.NamedVector(name=vector_name, vector=query_vectors[i]) if vector_name else query_vectors[i],
+                    vector=rest.NamedVector(name=vector_name, vector=qv) if vector_name else qv,
                     limit=k,
                     filter=query_filter,
                     params=search_params,
@@ -721,6 +759,10 @@ class QdrantAdapter(DatabaseAdapter):
     def insert_dedup(
         self, ids: List[int], vectors: List[List[float]], signatures: List[bytes]
     ) -> None:
+        if hasattr(vectors, "tolist"):
+            vectors = vectors.tolist()
+        else:
+            vectors = [v.tolist() if hasattr(v, "tolist") else v for v in vectors]
         # Convert bytes to lists of ints for JSON serialization
         import struct
         points = []
