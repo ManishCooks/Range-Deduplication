@@ -312,7 +312,7 @@ class MilvusAdapter(DatabaseAdapter):
 
             return QueryResult(
                 data=data,
-                total_count=self._get_num_entities(),
+                total_count=-1,
                 execution_time_ms=elapsed,
             )
         except Exception as e:
@@ -337,7 +337,7 @@ class MilvusAdapter(DatabaseAdapter):
                 output_fields=["id"],
             )
             elapsed = (time.perf_counter() - start) * 1000
-            total = self._get_num_entities()
+            total = -1
             batch_results = []
             for hits in results:
                 hit_data = [

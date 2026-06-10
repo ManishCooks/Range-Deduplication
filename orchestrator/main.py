@@ -314,6 +314,41 @@ def main(config_path: Optional[str] = None) -> Dict[str, Any]:
                 output_dir=pass_dir,
                 monitor_timeline= None,
             )
+
+        # =========================================================================
+        # SAVE REINDEX RESULTS + UMAP PLOTS
+        # =========================================================================
+        
+        monitor_events = results.get("_monitor_events", [])
+        umap_events    = results.get("_umap_events", [])
+        
+        reindex_idx = 1
+        for evt in monitor_events:
+            if evt and evt.get("event") == "reindex":
+                reidx_dir = output_dir / f"reindex_{reindex_idx}"
+                reidx_dir.mkdir(exist_ok=True)
+                
+                reidx_file = reidx_dir / "reindex_metrics.json"
+                
+                with open(reidx_file, "w") as f:
+                    json.dump(evt, f, indent=2, cls=_NumpyEncoder)
+                
+                print(f"[Orchestrator] Reindex {reindex_idx} metrics saved to: {reidx_file}")
+
+                # If there's a corresponding umap event, plot it inside this folder
+                # In rwd_workload, umap_events are appended sequentially just before reindex
+                # So umap_events[reindex_idx - 1] should correspond to reindex_idx
+                if umap_events and len(umap_events) >= reindex_idx:
+                    u_evt = umap_events[reindex_idx - 1]
+                    if u_evt:
+                        from orchestrator.operations.plotting import _plot_umap_drift_events
+                        # We don't want it inside a "umap_plots" subfolder here, but _plot_umap_drift_events
+                        # hardcodes `umap_dir = out_dir / "umap_plots"`. We can pass reidx_dir and it will make
+                        # reindex_1/umap_plots/umap_drift_event_X.png, which is perfectly fine.
+                        _plot_umap_drift_events([u_evt], reidx_dir)
+
+                reindex_idx += 1
+
    
     finally:
         orchestrator._cleanup()
