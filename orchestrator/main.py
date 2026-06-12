@@ -174,20 +174,17 @@ class Orchestrator:
             sys_stats = monitor.stop()
             filtered_sys: Dict[str, Any] = {}
 
-            for key in metrics_cfg.get("system", []):
-                if key in sys_stats:
-                    filtered_sys[key] = sys_stats[key]
-
             for name in container_names:
                 safe = name.replace("-", "_")
                 for metric in metrics_cfg.get("docker", []):
-                    key = f"docker_{safe}_{metric}"
-                    if key in sys_stats:
-                        filtered_sys[key] = sys_stats[key]
+                    prefix = f"docker_{safe}_{metric}"
+                    for sys_key, sys_val in sys_stats.items():
+                        if sys_key.startswith(prefix):
+                            filtered_sys[sys_key] = sys_val
 
-            # Always include PipeANN metrics if they exist
+            # Always include Process metrics if they exist
             for key, val in sys_stats.items():
-                if key.startswith("pipeann_"):
+                if key.startswith("proc_"):
                     filtered_sys[key] = val
                     
             results["system_metrics"] = filtered_sys
