@@ -80,6 +80,9 @@ class DatabaseConfig(BaseModel):
     port: int = Field(default=19530)
     collection: str = Field(default="default")
     pinecone_config: Optional[PineconeConfig] = Field(default=None)
+    # PipeANN-specific: where on-disk index files are stored.
+    # All other PipeANN tuning params live in the standard index.params block.
+    index_dir: str = Field(default="./pipeann_indices")
 
 
 class QuantizationConfig(BaseModel):
@@ -107,9 +110,8 @@ class GlobalConfig(BaseModel):
     
     ingest_batch_size: int = Field(default=1500, ge=1)
     query_batch_size: int = Field(default=500, ge=1)
-    vector_dimension: int = Field(default=128, ge=1)    
+    vector_dimension: int = Field(default=128, ge=1)
     drop_collection_first: bool = Field(default=True)
-    pipeann_config: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 # Common knobs for all workloads
 class CommonWorkloadKnobs(BaseModel):

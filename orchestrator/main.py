@@ -76,9 +76,18 @@ class Orchestrator:
         extra_kwargs = {}
         if db_config.adapter in ("pinecone", "pinecone_serverless") and hasattr(db_config, "pinecone_config") and db_config.pinecone_config:
             extra_kwargs["pinecone_config"] = db_config.pinecone_config.model_dump()
-         
+
         if db_config.adapter == "pipeann":
-            extra_kwargs["pipeann_config"] = self.config.get("global", {}).get("pipeann_config", {})
+            # Read graph/search params from the standard index config block.
+            # No separate pipeann_config needed.
+            idx_cfg = self.config.get("index", {})
+            extra_kwargs["index_params"]  = idx_cfg.get("params",        {})
+            extra_kwargs["search_params"] = idx_cfg.get("search_params", {})
+            extra_kwargs["metric"]        = idx_cfg.get("metric",        "l2")
+            extra_kwargs["index_dir"]     = db_config.index_dir if hasattr(db_config, "index_dir") else "./pipeann_indices"
+            # ingest_concurrency is Optional[int] in the schema; fall back to 4.
+            extra_kwargs["n_threads"]     = self.global_config_model.ingest_concurrency or 4
+            extra_kwargs["data_type"]     = idx_cfg.get("data_type", "float32")
         self.adapter = get_adapter(
             adapter_type=db_config.adapter,
             host=db_config.host,
