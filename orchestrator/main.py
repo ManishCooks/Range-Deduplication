@@ -158,9 +158,6 @@ class Orchestrator:
             
             import os
             adapter_type = self.config.get("global", {}).get("database", {}).get("adapter", "")
-            if adapter_type == "pipeann":
-                monitor.set_pipeann_pid(os.getpid())
-
             monitor.start()
             print("[Orchestrator] System monitor started.")
 
