@@ -154,10 +154,18 @@ class Orchestrator:
 
         if monitor_enabled:
             from orchestrator.operations.system_monitor import SystemMonitor
-            monitor = SystemMonitor(container_names=container_names)
             
-            import os
-            adapter_type = self.config.get("global", {}).get("database", {}).get("adapter", "")
+            # Dynamically extract data_dir/index_dir for ANY process-based DB
+            db_config_raw = self.config.get("global", {}).get("database", {})
+            data_dir = db_config_raw.get("index_dir") or db_config_raw.get("data_dir")
+            
+            # Fallback to schema default if not explicitly provided in JSON
+            if not data_dir and hasattr(self.global_config_model.database, "index_dir"):
+                data_dir = getattr(self.global_config_model.database, "index_dir")
+
+            monitor = SystemMonitor(container_names=container_names, data_dir=data_dir)
+
+
             monitor.start()
             print("[Orchestrator] System monitor started.")
 
