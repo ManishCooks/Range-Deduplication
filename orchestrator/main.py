@@ -186,6 +186,12 @@ class Orchestrator:
                     for sys_key, sys_val in sys_stats.items():
                         if sys_key.startswith(prefix):
                             filtered_sys[sys_key] = sys_val
+                            
+            for metric in metrics_cfg.get("docker", []):
+                prefix = f"docker_combined_{metric}"
+                for sys_key, sys_val in sys_stats.items():
+                    if sys_key.startswith(prefix):
+                        filtered_sys[sys_key] = sys_val
 
             # Always include Process metrics if they exist
             for key, val in sys_stats.items():
