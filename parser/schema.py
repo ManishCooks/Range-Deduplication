@@ -63,14 +63,13 @@ class MetricType(str, Enum):
 # CONFIG MODELS
 # =============================================================================
 
-class PineconeConfig(BaseModel):
-    """Pinecone Serverless connection settings."""
-    index_name: str = Field(default="dynavec-index")
-    dimension: int = Field(default=128, ge=1)
-    metric: Literal["cosine", "euclidean", "dotproduct"] = Field(default="cosine")
-    cloud: Literal["aws", "gcp", "azure"] = Field(default="aws")
-    region: str = Field(default="us-east-1")
-    namespace: str = Field(default="")
+class FAISSConfig(BaseModel):
+    """FAISS local index settings (in-process, no server required)."""
+    collection: str = Field(default="faiss-default")
+    index_path: Optional[str] = Field(
+        default=None,
+        description="If set, load/save the index to/from this path for persistence"
+    )
 
 
 class DatabaseConfig(BaseModel):
@@ -79,10 +78,11 @@ class DatabaseConfig(BaseModel):
     host: str = Field(default="localhost")
     port: int = Field(default=19530)
     collection: str = Field(default="default")
-    pinecone_config: Optional[PineconeConfig] = Field(default=None)
+    faiss_config: Optional[FAISSConfig] = Field(default=None)
     # PipeANN-specific: where on-disk index files are stored.
     # All other PipeANN tuning params live in the standard index.params block.
     index_dir: str = Field(default="./pipeann_indices")
+
 
 
 class QuantizationConfig(BaseModel):

@@ -74,8 +74,8 @@ class Orchestrator:
         print(f"[Orchestrator] Connecting to {db_config.adapter}://{db_config.host}:{db_config.port}")
 
         extra_kwargs = {}
-        if db_config.adapter in ("pinecone", "pinecone_serverless") and hasattr(db_config, "pinecone_config") and db_config.pinecone_config:
-            extra_kwargs["pinecone_config"] = db_config.pinecone_config.model_dump()
+        if db_config.adapter == "faiss" and hasattr(db_config, "faiss_config") and db_config.faiss_config:
+            extra_kwargs["faiss_config"] = db_config.faiss_config.model_dump()
 
         if db_config.adapter == "pipeann":
             # Read graph/search params from the standard index config block.
