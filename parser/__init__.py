@@ -60,7 +60,20 @@ from parser.parser import (
     get_drift_min_buffer,
     get_ttl_seconds,
     get_ttl_jitter,
-
+    
+    # Temporal Freshness Workload
+    get_k_prime,
+    get_freshness_weight,
+    get_decay_lambda,
+    get_similarity_threshold,
+    get_time_window_days,
+    get_distribution_mode,
+    get_beta_a,
+    get_beta_b,
+    get_rerank_concurrency,
+    get_time_source,
+    get_time_column,
+    get_timestamp_path,
 )
 
 __all__ = [
@@ -120,4 +133,18 @@ __all__ = [
 
     "get_ttl_seconds",
     "get_ttl_jitter",
+
+    # Temporal Freshness Workload
+    "get_k_prime",
+    "get_freshness_weight",
+    "get_decay_lambda",
+    "get_similarity_threshold",
+    "get_time_window_days",
+    "get_distribution_mode",
+    "get_beta_a",
+    "get_beta_b",
+    "get_rerank_concurrency",
+    "get_time_source",
+    "get_time_column",
+    "get_timestamp_path",
 ]

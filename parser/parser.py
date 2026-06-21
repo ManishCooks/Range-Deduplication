@@ -584,19 +584,59 @@ def get_k_prime(config: Dict[str, Any]) -> int:
     return int(get_workload_config(config).get("k_prime", 50))
 
 
-def get_alpha(config: Dict[str, Any]) -> float:
-    """Get freshness/causal weight (0=pure semantic, 1=pure freshness)."""
-    return float(get_workload_config(config).get("alpha", 0.3))
+def get_freshness_weight(config: Dict[str, Any]) -> float:
+    """Get freshness weight (0=pure semantic, 1=pure freshness)."""
+    return float(get_workload_config(config).get("freshness_weight", 0.3))
 
 
 def get_decay_lambda(config: Dict[str, Any]) -> float:
     """Get exponential decay rate for the causal score."""
-    return float(get_workload_config(config).get("decay_lambda", 0.01))
+    return float(get_workload_config(config).get("decay_lambda", 1 / 86400))
 
 
 def get_similarity_threshold(config: Dict[str, Any]) -> float:
     """Get minimum semantic inner-product score for re-ranking."""
     return float(get_workload_config(config).get("similarity_threshold", 0.0))
+
+
+def get_time_window_days(config: Dict[str, Any]) -> int:
+    """Get the time window size in days."""
+    return int(get_workload_config(config).get("time_window_days", 365))
+
+
+def get_distribution_mode(config: Dict[str, Any]) -> str:
+    """Get the temporal distribution mode."""
+    return get_workload_config(config).get("distribution_mode", "uniform")
+
+
+def get_beta_a(config: Dict[str, Any]) -> float:
+    """Get beta_a parameter for beta distribution."""
+    return float(get_workload_config(config).get("beta_a", 2.0))
+
+
+def get_beta_b(config: Dict[str, Any]) -> float:
+    """Get beta_b parameter for beta distribution."""
+    return float(get_workload_config(config).get("beta_b", 5.0))
+
+
+def get_rerank_concurrency(config: Dict[str, Any]) -> int:
+    """Get concurrency level for re-ranking."""
+    return int(get_workload_config(config).get("rerank_concurrency", 1))
+
+
+def get_time_source(config: Dict[str, Any]) -> str:
+    """Get time source (synthetic or metadata)."""
+    return get_workload_config(config).get("time_source", "synthetic")
+
+
+def get_time_column(config: Dict[str, Any]) -> str:
+    """Get metadata column name for time."""
+    return get_workload_config(config).get("time_column", "timestamp")
+
+
+def get_timestamp_path(config: Dict[str, Any]) -> str | None:
+    """Get optional path to separate timestamp file."""
+    return get_workload_config(config).get("timestamp_path", None)
 
 
 # =============================================================================

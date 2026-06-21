@@ -528,6 +528,7 @@ class TemporalFreshnessWorkloadKnobs(CommonWorkloadKnobs):
     rerank_concurrency: int = Field(default=1, ge=1)
     time_source: Literal["synthetic", "metadata"] = Field(default="synthetic")
     time_column: str = Field(default="timestamp")
+    timestamp_path: Optional[str] = Field(default=None)
     total_queries: int = Field(default=10000, ge=1)
 
 class DeduplicationWorkloadKnobs(CommonWorkloadKnobs):
