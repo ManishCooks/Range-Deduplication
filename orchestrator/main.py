@@ -74,20 +74,21 @@ class Orchestrator:
         print(f"[Orchestrator] Connecting to {db_config.adapter}://{db_config.host}:{db_config.port}")
 
         extra_kwargs = {}
-        if db_config.adapter == "faiss" and hasattr(db_config, "faiss_config") and db_config.faiss_config:
-            extra_kwargs["faiss_config"] = db_config.faiss_config.model_dump()
 
-        if db_config.adapter == "pipeann":
-            # Read graph/search params from the standard index config block.
-            # No separate pipeann_config needed.
-            idx_cfg = self.config.get("index", {})
-            extra_kwargs["index_params"]  = idx_cfg.get("params",        {})
-            extra_kwargs["search_params"] = idx_cfg.get("search_params", {})
-            extra_kwargs["metric"]        = idx_cfg.get("metric",        "l2")
-            extra_kwargs["index_dir"]     = db_config.index_dir if hasattr(db_config, "index_dir") else "./pipeann_indices"
-            # ingest_concurrency is Optional[int] in the schema; fall back to 4.
-            extra_kwargs["n_threads"]     = self.global_config_model.ingest_concurrency or 4
-            extra_kwargs["data_type"]     = idx_cfg.get("data_type", "float32")
+        idx_cfg = self.config.get("index", {})
+        extra_kwargs["index_type"]    = idx_cfg.get("type",          "HNSW")
+        extra_kwargs["index_params"]  = idx_cfg.get("params",        {})
+        extra_kwargs["search_params"] = idx_cfg.get("search_params", {})
+        extra_kwargs["metric"]        = idx_cfg.get("metric",        "l2")
+        
+        # Read n_threads and data_type for adapters that need it (e.g. PipeANN)
+        extra_kwargs["n_threads"]     = self.global_config_model.ingest_concurrency or 4
+        extra_kwargs["data_type"]     = idx_cfg.get("data_type", "float32")
+        
+        # We can extract index_dir from index_params or db_config
+        _idx_dir = extra_kwargs["index_params"].get("index_dir") or getattr(db_config, "index_dir", None)
+        if _idx_dir is not None:
+            extra_kwargs["index_dir"] = _idx_dir
         self.adapter = get_adapter(
             adapter_type=db_config.adapter,
             host=db_config.host,

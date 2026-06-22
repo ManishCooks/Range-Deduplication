@@ -29,6 +29,7 @@ class QdrantConfig:
     api_key: Optional[str] = None
     timeout: float = 10.0
     prefer_grpc: bool = True
+    index_params: Dict[str, Any] = None
 
 
 METRIC_MAP = {
@@ -138,12 +139,20 @@ class QdrantAdapter(DatabaseAdapter):
         # To match Milvus pipeline, we defer full setup to create_index or do it here.
         # But Qdrant requires vector size at collection creation.
         
+        hnsw_config = None
+        if self._config.index_params:
+            hnsw_config = rest.HnswConfigDiff(
+                m=self._config.index_params.get("M"),
+                ef_construct=self._config.index_params.get("ef_construction")
+            )
+
         self._client.create_collection(
             collection_name=collection_name,
             vectors_config=rest.VectorParams(
                 size=vector_dim,
                 distance=rest.Distance.COSINE
-            )
+            ),
+            hnsw_config=hnsw_config
         )
         print(f"[QdrantAdapter] Created collection: {collection_name} (dim={vector_dim})")
         return {"status": "created", "collection": collection_name, "dim": vector_dim}
@@ -168,12 +177,44 @@ class QdrantAdapter(DatabaseAdapter):
             m=raw.get("M"),
             ef_construct=raw.get("ef_construction")
         )
+
+        quantization = quantization or {}
+        q_config = None
+        quant_method = quantization.get("method", "").upper()
+        if quant_method:
+            if quant_method in ("SQ8", "SCALAR"):
+                q_config = rest.ScalarQuantization(
+                    scalar=rest.ScalarQuantizationConfig(
+                        type=rest.ScalarType.INT8,
+                        always_ram=True
+                    )
+                )
+                print(f"[QdrantAdapter] Enabling Scalar Quantization")
+            elif quant_method in ("PQ", "PRODUCT"):
+                # Usually PQ configuration requires compression ratio
+                q_config = rest.ProductQuantization(
+                    product=rest.ProductQuantizationConfig(
+                        compression=rest.CompressionRatio.X16,
+                        always_ram=True
+                    )
+                )
+                print(f"[QdrantAdapter] Enabling Product Quantization")
         
-        self._client.update_collection(
-            collection_name=self._config.collection,
-            hnsw_config=hnsw_config
-        )
-        print(f"[QdrantAdapter] Updated HNSW index parameters")
+        try:
+            if q_config:
+                self._client.update_collection(
+                    collection_name=self._config.collection,
+                    hnsw_config=hnsw_config,
+                    quantization_config=q_config
+                )
+            else:
+                self._client.update_collection(
+                    collection_name=self._config.collection,
+                    hnsw_config=hnsw_config
+                )
+            print(f"[QdrantAdapter] Updated HNSW index parameters")
+        except Exception as e:
+            print(f"[QdrantAdapter] Failed to update collection parameters: {e}")
 
         return {
             "status": "created",

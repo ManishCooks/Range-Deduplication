@@ -79,9 +79,8 @@ class DatabaseConfig(BaseModel):
     port: int = Field(default=19530)
     collection: str = Field(default="default")
     faiss_config: Optional[FAISSConfig] = Field(default=None)
-    # PipeANN-specific: where on-disk index files are stored.
-    # All other PipeANN tuning params live in the standard index.params block.
-    index_dir: str = Field(default="./pipeann_indices")
+    # Optional directory for local index persistence (e.g. FAISS, PipeANN).
+    index_dir: Optional[str] = Field(default=None)
 
 
 

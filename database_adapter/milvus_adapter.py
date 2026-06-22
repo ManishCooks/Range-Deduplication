@@ -198,6 +198,16 @@ class MilvusAdapter(DatabaseAdapter):
         self._metric_type = METRIC_MAP.get(metric.lower(), "COSINE")
         milvus_index_type = INDEX_TYPE_MAP.get(index_type.lower(), index_type.upper())
         raw = params or {}
+        quantization = quantization or {}
+
+        quant_method = quantization.get("method", "").upper()
+        if quant_method:
+            if quant_method == "SQ8":
+                milvus_index_type = "IVF_SQ8"
+                print(f"[MilvusAdapter] Auto-mapped index to {milvus_index_type} for SQ8 quantization")
+            elif quant_method in ("PQ", "PRODUCT"):
+                milvus_index_type = "IVF_PQ"
+                print(f"[MilvusAdapter] Auto-mapped index to {milvus_index_type} for PQ quantization")
 
         if milvus_index_type == "HNSW":
             idx_params = {
@@ -207,8 +217,8 @@ class MilvusAdapter(DatabaseAdapter):
         elif milvus_index_type in ("IVF_FLAT", "IVF_PQ", "IVF_SQ8"):
             idx_params = {"nlist": raw.get("nlist", 1024)}
             if milvus_index_type == "IVF_PQ":
-                idx_params["m"] = raw.get("m", 8)
-                idx_params["nbits"] = raw.get("nbits", 8)
+                idx_params["m"] = raw.get("m", quantization.get("m", 8))
+                idx_params["nbits"] = raw.get("nbits", quantization.get("nbits", 8))
         elif milvus_index_type == "FLAT":
             idx_params = {}
         elif milvus_index_type == "SCANN":
