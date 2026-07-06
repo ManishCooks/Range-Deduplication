@@ -1,0 +1,8 @@
+pydantic
+numpy
+docker
+h5py
+qdrant-client
+pymilvus
+matplotlib
+umap-learn

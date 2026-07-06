@@ -22,7 +22,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from data_loader import load_hdf5_dataset, normalize_vectors
 from orchestrator.operations.metrics import collect_metrics
-from workloads.deduplication_workload.bloom_filter import BloomFilter, SignatureMinHash
+from orchestrator.operations.bloom_filter import BloomFilter, SignatureMinHash
 
 
 def run_workload(config: Dict[str, Any], adapter) -> Dict[str, Any]:
