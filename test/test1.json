@@ -1,0 +1,91 @@
+{
+    "global": {
+        "database": {
+            "adapter": "milvus",
+            "host": "localhost",
+            "port": 19530,
+            "collection": "dedup_test",
+            "index_dir": null
+        },
+        "dataset": "sift1M",
+        "seed": 42,
+        "read_concurrency": 2,
+        "ingest_concurrency": 4,
+        "ingest_batch_size": 25000,
+        "query_source": "test_set",
+        "query_batch_size": 1500,
+        "drop_collection_first": true,
+        "use_mmap": false,
+        "monitor_system": true,
+        "containers": [
+            "milvus-standalone",
+            "milvus-minio",
+            "milvus-etcd"
+        ],
+        "system_metrics": {
+            "docker": [
+                "cpu",
+                "mem_mb",
+                "read_mbps",
+                "write_mbps",
+                "read_total_mb",
+                "write_total_mb",
+                "disk_usage"
+            ]
+        }
+    },
+    "index": {
+        "type": "MINHASH_LSH",
+        "metric": "MHJACCARD",
+        "params": {
+            "mh_element_bit_width": 32,
+            "mh_lsh_band": 10,
+            "with_raw_data": false
+        },
+        "search_params": {
+            "nprobe": 10
+        }
+    },
+    "workload": {
+        "type": "deduplication_workload",
+        "top_K": 100,
+        "num_perm": 128,
+        "jaccard_threshold": 0.65,
+        "initial_ingest_ratio": 0.98,
+        "lsh_search_concurrency": 4,
+        "bloom_capacity": 1000000,
+        "bloom_error_rate": 0.01,
+        "metrics": [
+            "total_processed",
+            "bloom_rejected",
+            "lsh_rejected",
+            "inserted",
+            "duplicate_rate",
+            "bloom_false_positive_rate",
+            "bloom_amplification",
+            "false_negative_rate",
+            "ingest_latency_p50",
+            "ingest_latency_p95",
+            "ingest_latency_p99",
+            "phase1_latency_avg",
+            "phase2_latency_avg",
+            "throughput_vps",
+            "hashing_latency_avg",
+            "hashing_latency_p50",
+            "hashing_latency_p95",
+            "hashing_latency_p99",
+            "bf_search_latency_avg",
+            "bf_search_latency_p50",
+            "bf_search_latency_p95",
+            "bf_search_latency_p99",
+            "lsh_search_latency_avg",
+            "lsh_search_latency_p50",
+            "lsh_search_latency_p95",
+            "lsh_search_latency_p99",
+            "insertion_latency_avg",
+            "insertion_latency_p50",
+            "insertion_latency_p95",
+            "insertion_latency_p99"
+        ]
+    }
+}

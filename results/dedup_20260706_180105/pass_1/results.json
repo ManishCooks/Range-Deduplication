@@ -1,0 +1,9 @@
+{
+  "config": "dedup",
+  "timestamp": "20260706_180105",
+  "results": {
+    "pass": 1,
+    "throughput": 590.5147243739245,
+    "dedup_recall": 0.0
+  }
+}
