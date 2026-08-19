@@ -11,6 +11,9 @@ This repository contains a framework for benchmarking and testing data deduplica
 - `deduplication_workload/`: Defines the core deduplication logic and tests.
 - `orchestrator/`: Central controller to coordinate database initialization, run the workload, capture metrics, and manage the system.
 - `parser/`: Parses and validates configuration schemas using Pydantic.
+- `reference_config/`: Example and reference JSON configurations for various workloads.
+- `results/`: Directory where benchmark outputs, system metrics, and generated plots are stored.
+- `test/`: Contains unit and integration tests for the application logic and adapters.
 - `run.py`: Main entry point for the application.
 
 ## Prerequisites
@@ -33,5 +36,5 @@ python run.py <path/to/config.json>
 
 Example:
 ```bash
-python run.py configs/glove1M_hnsw.json
+python run.py reference_config/deduplication.json
 ```
