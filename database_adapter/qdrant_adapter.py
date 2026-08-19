@@ -301,10 +301,7 @@ class QdrantAdapter(DatabaseAdapter):
 
             return QueryResult(
                 data=data,
-                total_count=self.get_stats().get(
-                    "num_entities",
-                    0,
-                ),
+                total_count=0, 
                 execution_time_ms=elapsed,
             )
 
@@ -347,7 +344,7 @@ class QdrantAdapter(DatabaseAdapter):
             )
 
             elapsed = (time.perf_counter() - start) * 1000
-            total = self.get_stats().get("num_entities", 0)
+            total = 0  
             batch_results = [
                 QueryResult(
                     data=[
@@ -756,7 +753,7 @@ class QdrantAdapter(DatabaseAdapter):
     # ------------------------------------------------------------------
 
     def create_dedup_collection(
-        self, vector_dim: int, signature_dim: int, drop_existing: bool = True
+        self, vector_dim: int, signature_dim: int, drop_existing: bool = True, **kwargs
     ) -> None:
         self._ensure_connected()
         collection_name = self._config.collection
@@ -779,7 +776,7 @@ class QdrantAdapter(DatabaseAdapter):
         # rest.VectorParams(size=signature_dim, distance=rest.Distance.JACCARD, datatype=rest.Datatype.UINT8)
         try:
             vectors_config["signature"] = rest.VectorParams(
-                size=signature_dim * 8, # Binary vectors in Qdrant are dimension of bits, but passed as bytes? Wait.
+                size=signature_dim, # signature_dim is already in bits
                 distance=rest.Distance.JACCARD,
                 datatype=rest.Datatype.UINT8
             )
@@ -799,7 +796,7 @@ class QdrantAdapter(DatabaseAdapter):
 
     def insert_dedup(
         self, ids: List[int], vectors: List[List[float]], signatures: List[bytes]
-    ) -> None:
+    ) -> float:
         if hasattr(vectors, "tolist"):
             vectors = vectors.tolist()
         else:
@@ -816,7 +813,9 @@ class QdrantAdapter(DatabaseAdapter):
                     vector={"vector": vec, "signature": sig_list}
                 )
             )
+        start = time.perf_counter()
         self._client.upsert(self._config.collection, points=points)
+        return (time.perf_counter() - start) * 1000
 
     def search_dedup_batch(
         self,
@@ -824,7 +823,7 @@ class QdrantAdapter(DatabaseAdapter):
         radius: float,
         top_k: int = 1,
         params: Optional[Dict[str, Any]] = None,
-    ) -> List[List[Dict[str, Any]]]:
+    ) -> Tuple[List[List[Dict[str, Any]]], float]:
         self._ensure_connected()
         params = params or {}
         search_params = None
@@ -844,16 +843,211 @@ class QdrantAdapter(DatabaseAdapter):
             requests.append(req)
 
         batch_results = []
-        CHUNK_SIZE = 1000
-        for i in range(0, len(requests), CHUNK_SIZE):
-            chunk = requests[i:i+CHUNK_SIZE]
-            res = self._client.search_batch(
-                collection_name=self._config.collection,
-                requests=chunk
-            )
-            batch_results.extend(res)
+        start = time.perf_counter()
+        res = self._client.search_batch(
+            collection_name=self._config.collection,
+            requests=requests
+        )
+        total_time = (time.perf_counter() - start) * 1000
+        
+        for hits in res:
+            formatted_hits = []
+            for hit in hits:
+                formatted_hits.append({
+                    "id": hit.id,
+                    "distance": hit.score,
+                })
+            batch_results.append(formatted_hits)
+                
+        return batch_results, total_time
 
-        return [
-            [{"id": hit.id, "distance": hit.score} for hit in hits]
-            for hits in batch_results
-        ]
+    # =============================================================================
+    # ADAPTER EXTENSION (Dense Dedup / Range Search)
+    # =============================================================================
+
+    def create_dense_dedup_collection(
+        self,
+        vector_dim: int,
+        index_type: str = "HNSW",
+        metric: str = "cosine",
+        index_params: Optional[Dict[str, Any]] = None,
+        drop_existing: bool = True,
+    ) -> None:
+        self._ensure_connected()
+        collection_name = self._config.collection
+
+        try:
+            if drop_existing:
+                self._client.delete_collection(collection_name)
+                print(f"[QdrantAdapter] Dropped existing collection: {collection_name}")
+        except Exception:
+            pass
+
+        distance_enum = METRIC_MAP.get(metric.lower(), rest.Distance.COSINE)
+        self._metric_type = metric.lower()
+
+        hnsw_config = None
+        if index_params:
+            hnsw_config = rest.HnswConfigDiff(
+                m=index_params.get("m", 16),
+                ef_construct=index_params.get("ef_construct", 100)
+            )
+
+        self._client.create_collection(
+            collection_name=collection_name,
+            vectors_config=rest.VectorParams(
+                size=vector_dim,
+                distance=distance_enum
+            ),
+            hnsw_config=hnsw_config,
+        )
+        print(f"[QdrantAdapter] Created dense dedup collection: {collection_name} (dim={vector_dim})")
+
+    def insert_dense_dedup(
+        self,
+        ids: List[int],
+        vectors: List[List[float]],
+    ) -> float:
+        self._ensure_connected()
+        points = []
+        for id_, vec in zip(ids, vectors):
+            points.append(
+                rest.PointStruct(
+                    id=id_,
+                    vector=vec
+                )
+            )
+        start = time.perf_counter()
+        self._client.upsert(self._config.collection, points=points)
+        return (time.perf_counter() - start) * 1000
+
+    def search_range_batch(
+        self,
+        query_vectors: List[List[float]],
+        radius: float,
+        top_k: int = 10,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[List[List[Dict[str, Any]]], float]:
+        self._ensure_connected()
+        params = params or {}
+        search_params = None
+        if params.get("ef") is not None:
+            search_params = rest.SearchParams(hnsw_ef=params["ef"])
+
+        metric = getattr(self, "_metric_type", "cosine")
+        if metric in ("cosine", "ip"):
+            threshold = 1.0 - radius
+        else:
+            threshold = -radius
+
+        requests = []
+        for vec in query_vectors:
+            req = rest.SearchRequest(
+                vector=vec,
+                limit=top_k,
+                params=search_params,
+                score_threshold=threshold,
+                with_payload=False,
+            )
+            requests.append(req)
+
+        batch_results = []
+        start = time.perf_counter()
+        res = self._client.search_batch(
+            collection_name=self._config.collection,
+            requests=requests
+        )
+        total_time = (time.perf_counter() - start) * 1000
+        
+        for hits in res:
+            formatted_hits = []
+            for hit in hits:
+                if metric in ("cosine", "ip"):
+                    dist = 1.0 - hit.score
+                else:
+                    dist = -hit.score
+                    
+                formatted_hits.append({
+                    "id": hit.id,
+                    "distance": dist,
+                })
+            batch_results.append(formatted_hits)
+                
+        return batch_results, total_time
+
+    def search_dedup(
+        self,
+        query_signature: bytes,
+        radius: float,
+        top_k: int = 1,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[List[Dict[str, Any]], float]:
+        self._ensure_connected()
+        params = params or {}
+        search_params = None
+        if params.get("ef") is not None:
+            search_params = rest.SearchParams(hnsw_ef=params["ef"])
+
+        sig_list = list(query_signature)
+        start = time.perf_counter()
+        res = self._client.search(
+            collection_name=self._config.collection,
+            query_vector=rest.NamedVector(name="signature", vector=sig_list),
+            limit=top_k,
+            search_params=search_params,
+            score_threshold=radius,
+            with_payload=False,
+        )
+        total_time = (time.perf_counter() - start) * 1000
+
+        formatted_hits = []
+        for hit in res:
+            formatted_hits.append({
+                "id": hit.id,
+                "distance": hit.score,
+            })
+        return formatted_hits, total_time
+
+    def search_range(
+        self,
+        query_vector: List[float],
+        radius: float,
+        top_k: int = 1,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[List[Dict[str, Any]], float]:
+        self._ensure_connected()
+        params = params or {}
+        search_params = None
+        if params.get("ef") is not None:
+            search_params = rest.SearchParams(hnsw_ef=params["ef"])
+
+        metric = getattr(self, "_metric_type", "cosine")
+        if metric in ("cosine", "ip"):
+            threshold = 1.0 - radius
+        else:
+            threshold = -radius
+
+        start = time.perf_counter()
+        res = self._client.search(
+            collection_name=self._config.collection,
+            query_vector=query_vector,
+            limit=top_k,
+            search_params=search_params,
+            score_threshold=threshold,
+            with_payload=False,
+        )
+        total_time = (time.perf_counter() - start) * 1000
+        
+        formatted_hits = []
+        for hit in res:
+            if metric in ("cosine", "ip"):
+                dist = 1.0 - hit.score
+            else:
+                dist = -hit.score
+                
+            formatted_hits.append({
+                "id": hit.id,
+                "distance": dist,
+            })
+                
+        return formatted_hits, total_time

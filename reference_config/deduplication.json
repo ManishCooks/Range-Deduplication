@@ -1,19 +1,18 @@
 {
     "global": {
         "database": {
-            "adapter": "mock",
+            "adapter": "milvus",
             "host": "localhost",
             "port": 19530,
-            "collection": "dedup_test",
-            "index_dir": null
+            "collection": "dedup_test"
         },
-        "dataset": "sift1M",
+        "dataset": "glove1M",
         "seed": 42,
         "read_concurrency": 2,
         "ingest_concurrency": 4,
         "ingest_batch_size": 25000,
         "query_source": "test_set",
-        "query_batch_size": 1500,
+        "query_batch_size": 1000,
         "drop_collection_first": true,
         "use_mmap": false,
         "monitor_system": true,
@@ -35,24 +34,23 @@
         }
     },
     "index": {
-        "type": "MINHASH_LSH",
-        "metric": "MHJACCARD",
+        "type": "HNSW",
+        "metric": "cosine",
         "params": {
-            "mh_element_bit_width": 32,
-            "mh_lsh_band": 10,
-            "with_raw_data": false
+            "M": 16,
+            "efConstruction": 200
         },
         "search_params": {
-            "nprobe": 10
+            "ef": 100
         }
     },
     "workload": {
         "type": "deduplication_workload",
         "top_K": 100,
-        "num_perm": 128,
-        "jaccard_threshold": 0.65,
+        "dense_radius": 0.3,
+        "jaccard_threshold": 0.4,
         "initial_ingest_ratio": 0.98,
-        "lsh_search_concurrency": 4,
+        "lsh_search_concurrency": 1,
         "bloom_capacity": 1000000,
         "bloom_error_rate": 0.01,
         "metrics": [

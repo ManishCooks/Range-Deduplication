@@ -68,7 +68,7 @@ def compute_gt(
 
     # Sign binarize query vectors once -> keep in RAM
     # active_dim[i, d] = 1 if query_vectors[i, d] > 0 else 0
-    query_bin    = (query_vectors > 0).astype(np.float32)    # (N_query, dim)
+    query_bin    = (query_vectors >= np.median(query_vectors, axis=1, keepdims=True)).astype(np.float32)    # (N_query, dim)
     query_counts = query_bin.sum(axis=1)                      # (N_query,) -- |S_{q_i}|
 
     gt_max_jaccard = np.zeros(n_query, dtype=np.float32)
@@ -80,7 +80,7 @@ def compute_gt(
         base_end   = min(base_start + chunk_size, n_base)
         base_chunk = base_vectors[base_start:base_end]        
 
-        base_bin    = (base_chunk > 0).astype(np.float32)        # (B, dim)
+        base_bin    = (base_chunk >= np.median(base_chunk, axis=1, keepdims=True)).astype(np.float32)        # (B, dim)
         base_counts = base_bin.sum(axis=1)                        # (B,) -- |S_{b_j}|
 
         if verbose:

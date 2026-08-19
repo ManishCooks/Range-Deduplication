@@ -5,7 +5,7 @@ Milvus Vector DB Adapter - Connects to Milvus via pymilvus MilvusClient (PyMilvu
 import time
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional , Tuple   
 
 from database_adapter.base import DatabaseAdapter, QueryResult, InsertResult, DeleteResult, HealthStatus
 from database_adapter.exceptions import ConnectionError, InsertError, QueryError
@@ -108,6 +108,8 @@ class MilvusAdapter(DatabaseAdapter):
             elif idx_type == "DISKANN":
                 # search_list must be >= k — Milvus errors if not satisfied
                 sp["params"]["search_list"] = params.get("search_list", 100)
+                if params.get("beam_width_ratio") is not None:
+                    sp["params"]["beam_width_ratio"] = params["beam_width_ratio"]
 
         if params.get("radius") is not None:
             sp["params"]["radius"] = params["radius"]
@@ -229,7 +231,7 @@ class MilvusAdapter(DatabaseAdapter):
         elif milvus_index_type == "DISKANN":
             # DiskANN has no required build params; all are optional tuning knobs.
             idx_params = {}
-            for key in ("max_degree", "search_list_size", "pq_code_budget_gb", "build_dram_budget_gb"):
+            for key in ("max_degree", "search_list_size", "pq_code_budget_gb", "pq_code_budget_gb_ratio", "build_dram_budget_gb"):
                 if key in raw:
                     idx_params[key] = raw[key]
         else:
@@ -666,9 +668,17 @@ class MilvusAdapter(DatabaseAdapter):
     # ------------------------------------------------------------------
 
     def create_dedup_collection(
-        self, vector_dim: int, signature_dim: int, drop_existing: bool = True
+        self, vector_dim: int, signature_dim: int, drop_existing: bool = True,
+        index_type: str = "MINHASH_LSH", metric_type: str = "MHJACCARD", index_params: Optional[Dict[str, Any]] = None
     ) -> None:
-        """Schema: [id INT64 PK, vector FLOAT_VECTOR, signature BINARY_VECTOR]"""
+        """
+        Schema: [id INT64 PK, vector FLOAT_VECTOR(vector_dim), signature BINARY_VECTOR(signature_dim)]
+
+        - `vector`    : raw float embedding. Carries a FLAT index (dummy — not searched during dedup).
+                        Milvus requires at least one FLOAT_VECTOR field in every collection.
+        - `signature` : MinHash bytes (BINARY_VECTOR). Carries MINHASH_LSH / MHJACCARD index.
+                        This is the field that Phase-2 dedup searches over.
+        """
         self._ensure_connected()
         collection_name = self._config.collection
 
@@ -677,27 +687,64 @@ class MilvusAdapter(DatabaseAdapter):
                 self._client.drop_collection(collection_name)
                 print(f"[Milvus] Dropped existing collection: {collection_name}")
             else:
+                print(f"[Milvus] Using existing dedup collection: {collection_name}")
                 return
 
+        # ------------------------------------------------------------------
+        # Build index params
+        # ------------------------------------------------------------------
+        index_params_obj = self._client.prepare_index_params()
+
+        # Dummy FLAT index on the raw vector field (required by Milvus; not used for dedup search)
+        index_params_obj.add_index(
+            field_name="vector",
+            index_type="FLAT",
+            metric_type="COSINE",
+            params={},
+        )
+
+        # Primary LSH index on the MinHash signature field
+        index_params_obj.add_index(
+            field_name="signature",
+            index_type=index_type,
+            metric_type=metric_type,
+            params=index_params or {},
+        )
+
+        # ------------------------------------------------------------------
+        # Build schema
+        # ------------------------------------------------------------------
         schema = self._client.create_schema(
             auto_id=False,
             enable_dynamic_field=False,
-            description="Deduplication Collection with Signatures",
+            description="Deduplication Collection with MinHash Signatures",
         )
-        schema.add_field("id", DataType.INT64, is_primary=True)
-        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=vector_dim)
+        schema.add_field("id",        DataType.INT64,         is_primary=True)
+        schema.add_field("vector",    DataType.FLOAT_VECTOR,  dim=vector_dim)
         schema.add_field("signature", DataType.BINARY_VECTOR, dim=signature_dim)
-        self._client.create_collection(collection_name, schema=schema)
-        print(f"[Milvus] Created dedup collection: {collection_name}")
+
+        # ------------------------------------------------------------------
+        # Create collection — propagate errors; do NOT swallow them silently.
+        # A failed create_collection will leave the collection in a broken state
+        # and cause cryptic failures in subsequent insert/search calls.
+        # ------------------------------------------------------------------
+        self._client.create_collection(collection_name, schema=schema, index_params=index_params_obj)
+        print(f"[Milvus] Created dedup collection: {collection_name} "
+              f"(vector_dim={vector_dim}, sig_dim={signature_dim}, index={index_type})")
+        self._client.load_collection(collection_name)
+        print(f"[Milvus] Dedup collection loaded. Signature index: {index_type} / {metric_type}")
 
     def insert_dedup(
         self, ids: List[int], vectors: List[List[float]], signatures: List[bytes]
-    ) -> None:
+    ) -> float:
+        """Insert id + raw float vector + MinHash signature bytes into the dedup collection."""
         data = [
             {"id": id_, "vector": vec, "signature": sig}
             for id_, vec, sig in zip(ids, vectors, signatures)
         ]
+        start = time.perf_counter()
         self._client.insert(self._config.collection, data)
+        return (time.perf_counter() - start) * 1000
 
     def search_dedup_batch(
         self,
@@ -705,35 +752,274 @@ class MilvusAdapter(DatabaseAdapter):
         radius: float,
         top_k: int = 1,
         params: Optional[Dict[str, Any]] = None,
-    ) -> List[List[Dict[str, Any]]]:
+    ) -> Tuple[List[List[Dict[str, Any]]], float]:
         """Batch range search on the 'signature' (BINARY_VECTOR) field using JACCARD."""
         self._ensure_connected()
         params = params or {}
         search_params: Dict[str, Any] = {
-            "metric_type": "JACCARD",
-            "params": {"radius": radius},
+            "metric_type": "MHJACCARD",
+            "params": {"mh_search_with_jaccard": True},
         }
         idx_type = (
-            self._index_params.get("index_type", "BIN_FLAT")
+            self._index_params.get("index_type", "MINHASH_LSH")
             if self._index_params
-            else "BIN_FLAT"
+            else "MINHASH_LSH"
         )
         if idx_type == "BIN_IVF_FLAT":
             search_params["params"]["nprobe"] = params.get("nprobe", 10)
+            search_params["params"]["radius"] = radius
+        elif idx_type != "MINHASH_LSH":
+            # Just in case there are other types that support radius
+            search_params["params"]["radius"] = radius
 
+        start = time.perf_counter()
         results = self._client.search(
             collection_name=self._config.collection,
             data=query_signatures,
             anns_field="signature",
             search_params=search_params,
             limit=top_k,
+            consistency_level="Strong",
             output_fields=["id"],
         )
+        elapsed = (time.perf_counter() - start) * 1000
 
         if not results:
-            return [[] for _ in range(len(query_signatures))]
+            return [[] for _ in range(len(query_signatures))], elapsed
 
-        return [
-            [{"id": hit["id"], "distance": hit["distance"]} for hit in hits]
-            for hits in results
-        ]
+        mapped_results = []
+        for hits in results:
+            # MHJACCARD distance is 1 - Jaccard similarity.
+            # radius here is search_radius = 1.0 - jaccard_threshold, so
+            # hit["distance"] <= radius  ⟺  Jaccard >= jaccard_threshold.
+            mapped_results.append([
+                {"id": hit["id"], "distance": hit["distance"]}
+                for hit in hits
+                if hit["distance"] <= radius
+            ])
+        return mapped_results, elapsed
+
+    # =============================================================================
+    # ADAPTER EXTENSION (Dense Dedup / Range Search)
+    # =============================================================================
+
+    def create_dense_dedup_collection(
+        self,
+        vector_dim: int,
+        index_type: str = "HNSW",
+        metric: str = "cosine",
+        index_params: Optional[Dict[str, Any]] = None,
+        drop_existing: bool = True,
+    ) -> None:
+        self._ensure_connected()
+        collection_name = self._config.collection
+
+        if self._client.has_collection(collection_name):
+            if drop_existing:
+                self._client.drop_collection(collection_name)
+                print(f"[MilvusAdapter] Dropped existing collection: {collection_name}")
+            else:
+                pass
+
+        schema = self._client.create_schema(
+            auto_id=False,
+            enable_dynamic_field=False,
+        )
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=vector_dim)
+
+        milvus_metric = "L2"
+        if metric.lower() == "cosine":
+            milvus_metric = "COSINE"
+        elif metric.lower() == "ip":
+            milvus_metric = "IP"
+            
+        self._metric_type = milvus_metric
+        self._index_params = {"metric_type": milvus_metric, "index_type": index_type.upper()}
+
+        params = index_params or {}
+        if index_type.upper() == "HNSW":
+            params.setdefault("M", 16)
+            params.setdefault("efConstruction", 100)
+            
+        index_params_obj = self._client.prepare_index_params()
+        index_params_obj.add_index(
+            field_name="vector",
+            index_type=index_type.upper(),
+            metric_type=milvus_metric,
+            params=params,
+        )
+
+        self._client.create_collection(
+            collection_name=collection_name,
+            schema=schema,
+            index_params=index_params_obj,
+        )
+        self.load_collection()
+        print(f"[MilvusAdapter] Created dense dedup collection: {collection_name} (dim={vector_dim}, index={index_type.upper()})")
+
+    def insert_dense_dedup(
+        self,
+        ids: List[int],
+        vectors: List[List[float]],
+    ) -> float:
+        self._ensure_connected()
+        data = [{"id": id_, "vector": vec} for id_, vec in zip(ids, vectors)]
+        start = time.perf_counter()
+        self._client.insert(collection_name=self._config.collection, data=data)
+        return (time.perf_counter() - start) * 1000
+
+    def search_range_batch(
+        self,
+        query_vectors: List[List[float]],
+        radius: float,
+        top_k: int = 10,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[List[List[Dict[str, Any]]], float]:
+        self._ensure_connected()
+        params = params or {}
+        metric_type = getattr(self, "_metric_type", "L2")
+        
+        if metric_type in ("COSINE", "IP"):
+            search_params: Dict[str, Any] = {
+                "metric_type": metric_type,
+                "params": {"radius": 1.0 - radius, "range_filter": 1.0},
+            }
+        else:
+            # L2 uses distance (lower is better).
+            # Milvus expects radius > range_filter, searching in [range_filter, radius].
+            search_params: Dict[str, Any] = {
+                "metric_type": metric_type,
+                "params": {"radius": radius, "range_filter": 0.0},
+            }
+        
+        if params:
+            for k, v in params.items():
+                if k not in ["radius", "range_filter"]:
+                    search_params["params"][k] = v
+
+        start = time.perf_counter()
+        results = self._client.search(
+            collection_name=self._config.collection,
+            data=query_vectors,
+            anns_field="vector",
+            search_params=search_params,
+            limit=top_k,
+            consistency_level="Strong",
+            output_fields=["id"],
+        )
+        elapsed = (time.perf_counter() - start) * 1000
+
+        if not results:
+            return [[] for _ in range(len(query_vectors))], elapsed
+
+        mapped_results = []
+        for hits in results:
+            batch_hits = []
+            for hit in hits:
+                dist = hit["distance"]
+                # Convert Milvus similarity back to distance for the caller
+                if metric_type in ("COSINE", "IP"):
+                    dist = 1.0 - dist
+                
+                # Double-check the threshold (adding slight epsilon for float math)
+                if dist <= radius + 1e-5:
+                    batch_hits.append({"id": hit["id"], "distance": dist})
+            mapped_results.append(batch_hits)
+        return mapped_results, elapsed
+
+    def search_dedup(
+        self,
+        query_signature: bytes,
+        radius: float,
+        top_k: int = 1,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[List[Dict[str, Any]], float]:
+        """Single signature search using JACCARD."""
+        self._ensure_connected()
+        params = params or {}
+        search_params: Dict[str, Any] = {
+            "metric_type": "MHJACCARD",
+            "params": {"mh_search_with_jaccard": True},
+        }
+        idx_type = (
+            self._index_params.get("index_type", "MINHASH_LSH")
+            if self._index_params
+            else "MINHASH_LSH"
+        )
+        if idx_type == "BIN_IVF_FLAT":
+            search_params["params"]["nprobe"] = params.get("nprobe", 10)
+            search_params["params"]["radius"] = radius
+        elif idx_type != "MINHASH_LSH":
+            search_params["params"]["radius"] = radius
+
+        start = time.perf_counter()
+        results = self._client.search(
+            collection_name=self._config.collection,
+            data=[query_signature],
+            anns_field="signature",
+            search_params=search_params,
+            limit=top_k,
+            consistency_level="Strong",
+            output_fields=["id"],
+        )
+        elapsed = (time.perf_counter() - start) * 1000
+
+        hits = []
+        if results:
+            for hit in results[0]:
+                dist = hit["distance"]
+                # For Jaccard similarity in Milvus, distance returned is actually the distance (1 - Jaccard).
+                if dist <= radius + 1e-5:
+                    hits.append({"id": hit["id"], "distance": dist})
+        return hits, elapsed
+
+    def search_range(
+        self,
+        query_vector: List[float],
+        radius: float,
+        top_k: int = 1,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[List[Dict[str, Any]], float]:
+        """Single float vector range search."""
+        self._ensure_connected()
+        params = params or {}
+        metric_type = getattr(self, "_metric_type", "L2")
+        
+        if metric_type in ("COSINE", "IP"):
+            search_params: Dict[str, Any] = {
+                "metric_type": metric_type,
+                "params": {"radius": 1.0 - radius, "range_filter": 1.0},
+            }
+        else:
+            search_params: Dict[str, Any] = {
+                "metric_type": metric_type,
+                "params": {"radius": radius, "range_filter": 0.0},
+            }
+        
+        if params:
+            for k, v in params.items():
+                if k not in ["radius", "range_filter"]:
+                    search_params["params"][k] = v
+
+        start = time.perf_counter()
+        results = self._client.search(
+            collection_name=self._config.collection,
+            data=[query_vector],
+            anns_field="vector",
+            search_params=search_params,
+            limit=top_k,
+            consistency_level="Strong",
+            output_fields=["id"],
+        )
+        elapsed = (time.perf_counter() - start) * 1000
+
+        hits = []
+        if results:
+            for hit in results[0]:
+                dist = hit["distance"]
+                if metric_type in ("COSINE", "IP"):
+                    dist = 1.0 - dist
+                if dist <= radius + 1e-5:
+                    hits.append({"id": hit["id"], "distance": dist})
+        return hits, elapsed

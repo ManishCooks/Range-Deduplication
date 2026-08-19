@@ -275,3 +275,89 @@ class DatabaseAdapter(ABC):
         """
         raise NotImplementedError("This adapter does not support partition stats.")
 
+    # =============================================================================
+    # ADAPTER EXTENSION (Dense Dedup / Range Search)
+    # =============================================================================
+
+    def create_dense_dedup_collection(
+        self,
+        vector_dim: int,
+        index_type: str = "HNSW",
+        metric: str = "cosine",
+        index_params: Optional[Dict[str, Any]] = None,
+        drop_existing: bool = True,
+    ) -> None:
+        """
+        Create a plain float-vector collection for dense range-based deduplication.
+        Schema: [id INT64 PK, vector FLOAT_VECTOR(vector_dim)]
+        No binary signature field — range search is done directly on float vectors.
+        Must be implemented by adapters supporting dense range search.
+        """
+        raise NotImplementedError("This adapter does not support dense dedup collections.")
+
+    def insert_dense_dedup(
+        self,
+        ids: List[int],
+        vectors: List[List[float]],
+    ) -> float:
+        """
+        Insert raw float vectors for dense dedup (no signature field).
+        Returns elapsed time in milliseconds.
+        """
+        raise NotImplementedError("This adapter does not support dense dedup insertion.")
+
+    def search_range_batch(
+        self,
+        query_vectors: List[List[float]],
+        radius: float,
+        top_k: int = 10,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[List[List[Dict[str, Any]]], float]:
+        """
+        Batch range search on raw float vectors.
+
+        For each query, return ALL stored vectors within `radius` distance
+        (up to top_k results per query).
+
+        Distance semantics depend on metric:
+            L2 / Euclidean:   distance = squared Euclidean distance; lower = closer
+            Cosine:           distance = 1 - cosine_similarity;      lower = closer
+            Inner product:    distance = -inner_product;              lower = closer
+
+        A vector is a duplicate if len(hits[i]) > 0.
+
+        Returns:
+            hits        : List[List[Dict[id, distance]]]  — length == len(query_vectors)
+            latency_ms  : float                           — wall-clock time for the batch
+        """
+        raise NotImplementedError("This adapter does not support range search.")
+
+    def search_dedup(
+        self,
+        query_signature: bytes,
+        radius: float,
+        top_k: int = 1,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[List[Dict[str, Any]], float]:
+        """
+        Single signature search.
+        Returns:
+            hits        : List[Dict[id, distance]]
+            latency_ms  : float
+        """
+        raise NotImplementedError("This adapter does not support single signature search.")
+
+    def search_range(
+        self,
+        query_vector: List[float],
+        radius: float,
+        top_k: int = 1,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[List[Dict[str, Any]], float]:
+        """
+        Single float vector range search.
+        Returns:
+            hits        : List[Dict[id, distance]]
+            latency_ms  : float
+        """
+        raise NotImplementedError("This adapter does not support single range search.")
